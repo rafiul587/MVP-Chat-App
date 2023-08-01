@@ -1,0 +1,9 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Base.Theme.MVPChatApplication" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <!-- Customize your light theme here. -->
+        <item name="colorPrimary">@color/black_500</item>
+    </style>
+
+    <style name="Theme.MVPChatApplication" parent="Base.Theme.MVPChatApplication" />
+</resources>
