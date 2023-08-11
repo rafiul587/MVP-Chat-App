@@ -1,71 +1,93 @@
 package com.example.mvpchatapplication.ui.chats
 
-import android.util.Log
+import androidx.paging.Pager
+import androidx.paging.PagingConfig
+import androidx.paging.PagingData
 import com.example.mvpchatapplication.data.Response
 import com.example.mvpchatapplication.data.models.Chat
 import com.example.mvpchatapplication.data.models.Message
 import com.example.mvpchatapplication.data.models.Profile
+import com.example.mvpchatapplication.data.sources.ChatsPagingSource
+import com.example.mvpchatapplication.di.ChatChannel
+import com.example.mvpchatapplication.ui.message.MessageRepository
 import com.example.mvpchatapplication.utils.handleApiResponse
+import dagger.hilt.android.scopes.ViewModelScoped
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.Realtime
-import io.github.jan.supabase.realtime.createChannel
+import io.github.jan.supabase.realtime.RealtimeChannel
 import io.github.jan.supabase.realtime.postgresChangeFlow
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.flowOf
 import javax.inject.Inject
 
+@ViewModelScoped
 class ChatsRepository @Inject constructor(
-    private val postgrest: Postgrest, private val realtime: Realtime
+    private val postgrest: Postgrest,
+    @ChatChannel
+    private val chatChannel: RealtimeChannel,
 ) {
-
-    suspend fun getAllChatRooms(): Response<List<Chat>> {
-        return handleApiResponse {
-            postgrest.from("inbox").select().decodeList()
-        }
+    private lateinit var pagingSource: ChatsPagingSource
+    fun getAllChatRooms(): Flow<PagingData<Chat>> {
+        return Pager(
+            config = PagingConfig(
+                pageSize = MessageRepository.PAGE_SIZE,
+                enablePlaceholders = false,
+                prefetchDistance = 5,
+                initialLoadSize = 30
+            ),
+            pagingSourceFactory = {
+                pagingSource = ChatsPagingSource(postgrest)
+                pagingSource
+            }
+        ).flow
     }
 
-    suspend fun connectRealtime(): Flow<PostgresAction.Insert> {
-        val realtimeChannel = realtime.createChannel("#chats")
-        realtime.connect()
-        val flow = realtimeChannel.postgresChangeFlow<PostgresAction.Insert>("public") {
-            table = "chats"
-        }
-        realtimeChannel.join()
+    fun invalidate() {
+        pagingSource.invalidate()
+    }
+
+    suspend fun connectRealtime(): Flow<PostgresAction> {
+
+                val flow = chatChannel.postgresChangeFlow<PostgresAction>("public") {
+                    table = "chats"
+                }
+                chatChannel.join()
+
         return flow
     }
 
-    suspend fun insert(message: Message) {
-        postgrest.from("messages").insert(message)
-    }
-
     suspend fun searchUserWithEmail(email: String): Response<Profile> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val result = postgrest["profiles"].select(
-                    columns = Columns.list("id", "name", "profile_image")
-                ) {
-                    limit(1)
-                    eq("email", email)
-                }.decodeSingle<Profile>()
-                Log.d("TAG", "searchUserWithEmail: $result")
-                Response.Success(result)
-            } catch (e: Exception) {
-                Log.d("TAG", "searchUserWithEmail: $e")
-                Response.Error(e)
-            }
+        return handleApiResponse {
+            postgrest["profiles"].select(
+                columns = Columns.list("id", "name", "profile_image")
+            ) {
+                limit(1)
+                eq("email", email)
+            }.decodeSingle()
         }
     }
 
     suspend fun setMessageSeenTrue(messageId: Int) {
-        postgrest["messages"].update(
-            {
-                set("seen", true)
+        handleApiResponse {
+            postgrest["messages"].update(
+                {
+                    set("seen", true)
+                }
+            ) {
+                eq("id", messageId)
             }
-        ) {
-            eq("id", messageId)
+        }
+    }
+
+    suspend fun getMessageById(messageId: Int): Response<Message> {
+        return handleApiResponse {
+            postgrest["messages"].select() {
+                limit(1)
+                eq("id", messageId)
+            }.decodeSingle()
         }
     }
 }

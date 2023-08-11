@@ -21,6 +21,7 @@ import com.example.mvpchatapplication.BindingFragment
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Profile
 import com.example.mvpchatapplication.databinding.FragmentProfileBinding
+import com.example.mvpchatapplication.utils.DialogListener
 import com.example.mvpchatapplication.utils.isDateValid
 import com.example.mvpchatapplication.utils.loadProfileImage
 import dagger.hilt.android.AndroidEntryPoint
@@ -28,12 +29,16 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 @AndroidEntryPoint
-class ProfileFragment : BindingFragment<FragmentProfileBinding>() {
+class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListener {
 
     private val viewModel by viewModels<ProfileViewModel>()
     override val bindingInflater: (LayoutInflater) -> ViewBinding
         get() = FragmentProfileBinding::inflate
     private val navController by lazy { findNavController() }
+
+    var passwordEditDialog: PasswordEditDialog? = null
+    var emailEditDialog: EmailEditDialog? = null
+
     private var isUpdated = false
     private val openGallery =
         registerForActivityResult(ActivityResultContracts.GetContent()) { uri ->
@@ -69,16 +74,18 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>() {
                     viewModel.profileUiState.collectLatest {
                         if (it.isLoggedOut) {
                             navController.navigate(R.id.action_navigation_profile_to_navigation_sign_in)
+                            return@collectLatest
                         }
                         binding.progressBar.isVisible = it.isLoading
                         binding.save.isEnabled = !it.isLoading
-                        it.profile?.let {
-                            binding.editTextName.setText(it.name)
-                            binding.editTextPhone.setText(it.phone)
-                            binding.editTextEmail.setText(it.email)
-                            binding.editTextBirthday.setText(it.birthday)
-                            binding.profileImage.loadProfileImage(it.profileImageUrl)
-                            /*if (isUpdated) {
+                        if (!it.isLoading && it.profile != null) {
+                            binding.editTextName.setText(it.profile.name)
+                            binding.editTextPhone.setText(it.profile.phone)
+                            binding.editTextEmail.setText(it.profile.email)
+                            binding.editTextBirthday.setText(it.profile.birthday)
+                            binding.profileImage.loadProfileImage(it.profile.profileImageUrl)
+
+                            if (isUpdated) {
                                 Toast.makeText(
                                     requireContext(),
                                     "Profile Updated Successfully!",
@@ -88,7 +95,7 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>() {
                                     navController.navigate(R.id.action_navigation_profile_to_navigation_chats)
                                 } else navController.popBackStack()
                                 isUpdated = false
-                            }*/
+                            }
                         }
 
                         it.error?.let {
@@ -104,19 +111,57 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>() {
                         }
                         if (it.isSuccess) {
                             binding.uploadProgress.isVisible = false
-                            Toast.makeText(requireContext(), "Profile image updated successfully!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(
+                                requireContext(),
+                                "Profile image updated successfully!",
+                                Toast.LENGTH_SHORT
+                            ).show()
                             viewModel.resetUploadState()
                         }
                         it.error?.let {
-                            Toast.makeText(requireContext(), "Upload Failed!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), "Upload Failed!", Toast.LENGTH_SHORT)
+                                .show()
                             viewModel.resetUploadState()
                         }
                     }
                 }
                 launch {
                     viewModel.passwordState.collectLatest {
-
                         binding.editTextPassword.setText(it)
+                    }
+                }
+                launch {
+                    viewModel.userModifyState.collectLatest {
+                        when (it) {
+                            is UserModifyState.Email -> {
+                                binding.editTextEmail.setText(it.email)
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Email updated successfully!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                emailEditDialog?.dismiss()
+                            }
+
+                            is UserModifyState.Error -> {
+                                Toast.makeText(requireContext(), it.error, Toast.LENGTH_SHORT)
+                                    .show()
+                                passwordEditDialog?.dismiss()
+                            }
+
+                            is UserModifyState.Password -> {
+                                binding.editTextPassword.setText(it.password)
+                                Toast.makeText(
+                                    requireContext(),
+                                    "Password updated successfully!",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                passwordEditDialog?.dismiss()
+                            }
+
+                            null -> {}
+                        }
+                        viewModel.resetUserModifyState()
                     }
                 }
             }
@@ -126,26 +171,10 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>() {
             isUpdated = true
             val name = binding.editTextName.text.trim().toString()
             val phone = binding.editTextPhone.text.trim().toString()
-            val email = binding.editTextEmail.text.trim().toString()
-            val password = binding.editTextPassword.text?.trim().toString()
             val birthday = binding.editTextBirthday.text.trim().toString()
 
             if (name.isEmpty()) {
                 binding.editTextName.error = "Name is required"
-                return@setOnClickListener
-            }
-
-            // Add validation for email if needed
-            if (email.isEmpty()) {
-                binding.editTextEmail.error = "Email is required"
-                return@setOnClickListener
-            } else if (!android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches()) {
-                binding.editTextEmail.error = "Invalid email format"
-                return@setOnClickListener
-            }
-
-            if (password.isEmpty()) {
-                binding.editTextPassword.error = "Password is required"
                 return@setOnClickListener
             }
 
@@ -157,21 +186,17 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>() {
             val profile = Profile(
                 name = name,
                 phone = phone,
-                email = email,
                 birthday = birthday,
             )
-            val oldProfile = viewModel.profileUiState.value.profile
-            val oldPassword = viewModel.passwordState.value
             viewModel.updateProfile(profile)
+        }
 
-            if (oldProfile != null && oldPassword.isNotEmpty()) {
-                if (oldProfile.email != profile.email || oldPassword != password) {
-                    viewModel.modifyUser(
-                        if (oldProfile.email != profile.email) email else "",
-                        if (oldPassword != password) password else ""
-                    )
-                }
-            }
+        binding.btnEditPassword.setOnClickListener {
+            showPasswordEditDialog()
+        }
+
+        binding.btnEditEmail.setOnClickListener {
+            showEmailEditDialog()
         }
 
         binding.editPhoto.setOnClickListener {
@@ -224,6 +249,18 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>() {
         }
     }
 
+    private fun showPasswordEditDialog() {
+        val password = binding.editTextPassword.text?.trim().toString() ?: ""
+        passwordEditDialog = PasswordEditDialog(this, password)
+        passwordEditDialog?.show(childFragmentManager, "PasswordEditDialog")
+    }
+
+    private fun showEmailEditDialog() {
+        val email = binding.editTextEmail.text.trim().toString()
+        emailEditDialog = EmailEditDialog(this, email)
+        emailEditDialog?.show(childFragmentManager, "EmailEditDialog")
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         outState.putBoolean("isUpdated", isUpdated)
@@ -231,5 +268,13 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>() {
 
     private fun openGallery() {
         openGallery.launch("image/*")
+    }
+
+    override fun onEmailChanged(email: String) {
+        viewModel.modifyUser(email = email)
+    }
+
+    override fun onPasswordChanged(password: String) {
+        viewModel.modifyUser(password = password)
     }
 }

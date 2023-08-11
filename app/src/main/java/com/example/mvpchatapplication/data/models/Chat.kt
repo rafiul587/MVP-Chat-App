@@ -16,7 +16,7 @@ data class Chat(
     @SerialName("last_message_content")
     val lastMessage: String? = null,
     @SerialName("last_message_seen")
-    val lastMessageSeen: Boolean? = null,
+    var lastMessageSeen: Boolean? = null,
     @SerialName("last_message_type")
     val lastMessageType: MessageType? = null,
     @SerialName("name")

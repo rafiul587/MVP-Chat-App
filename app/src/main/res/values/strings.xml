@@ -4,6 +4,7 @@
     <string name="new_password_hint">New Password</string>
     <string name="password_hint">Enter Password</string>
     <string name="email_hint">Enter Email</string>
+    <string name="new_email_hint">Enter New Email</string>
     <string name="name_hint">Enter Name</string>
     <string name="phone_hint">Enter Phone</string>
     <string name="birthday_hint">Enter Birthday(DD/MM/YYYY)</string>
@@ -13,20 +14,25 @@
     <string name="profile_image">Profile Image</string>
     <string name="profile_save_btn_text">Save Changes</string>
     <string name="type_here">Type here..</string>
-    <string name="search">Search</string>
-    <!-- TODO: Remove or change this placeholder text -->
-    <string name="hello_blank_fragment">Hello blank fragment</string>
+    <string name="search">Search user with email</string>
     <string name="title_chats">Chats</string>
     <string name="title_chat">Chat</string>
     <string name="title_profile">My Profile</string>
     <string name="title__sign_up">Sign Up</string>
     <string name="title_sign_in">Sign In</string>
     <string name="network_error">Network Error!</string>
-    <string name="other_errors">Something Went Wrong!</string>
+    <string name="other_errors">Something went wrong!</string>
     <string name="take_photo">Take Photo</string>
     <string name="start_capture">Start Capture</string>
     <string name="stop_capture">Stop Capture</string>
     <string name="title_capture_media">Capture Media</string>
     <string name="title_send_media">Send Media</string>
     <string name="message_send_link_success">We have sent a password reset link to <b>%s</b>. Please check spam folder if you don\'t see it in inbox.</string>
+    <string name="you_sent_photo">You sent a photo.</string>
+    <string name="user_sent_photo">%1$s sent a photo.</string>
+    <string name="you_sent_video">You sent a video.</string>
+    <string name="user_sent_video">%1$s sent a video.</string>
+    <string name="error_empty_email">Email is empty!</string>
+    <string name="error_invalid_email">Email is invalid!</string>
+    <string name="error_no_user_found">No user found with this email!</string>
 </resources>

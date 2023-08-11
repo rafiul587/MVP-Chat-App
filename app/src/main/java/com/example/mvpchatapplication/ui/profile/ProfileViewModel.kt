@@ -20,8 +20,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ProfileViewModel @Inject constructor(
-        private val savedStateHandle: SavedStateHandle,
-        private val repository: ProfileRepository,
+    private val savedStateHandle: SavedStateHandle,
+    private val repository: ProfileRepository,
 ) : ViewModel() {
 
     private var _profileUiState = MutableStateFlow(ProfileUiState())
@@ -33,6 +33,10 @@ class ProfileViewModel @Inject constructor(
     private var _passwordState = MutableStateFlow("")
     val passwordState = _passwordState.asStateFlow()
 
+    private var _userModifyState = MutableStateFlow<UserModifyState?>(null)
+    val userModifyState = _userModifyState.asStateFlow()
+
+
     private fun getUserProfile() = viewModelScope.launch {
         when (val result = repository.getUserProfile()) {
             is Response.Success -> {
@@ -42,8 +46,8 @@ class ProfileViewModel @Inject constructor(
             is Response.Error -> {
                 _profileUiState.update {
                     it.copy(
-                            isLoading = false,
-                            error = result.error.message ?: "Something went wrong!"
+                        isLoading = false,
+                        error = result.error.message ?: "Something went wrong!"
                     )
                 }
             }
@@ -59,8 +63,8 @@ class ProfileViewModel @Inject constructor(
 
             is Response.Error -> _profileUiState.update {
                 it.copy(
-                        isLoading = false,
-                        error = it.error
+                    isLoading = false,
+                    error = it.error
                 )
             }
         }
@@ -69,23 +73,23 @@ class ProfileViewModel @Inject constructor(
 
     fun uploadProfileImage(uri: Uri) = viewModelScope.launch {
         repository.uploadProfileImage(uri = uri)
-                .flowOn(Dispatchers.IO)
-                .catch {
-                    _uploadState.update { it.copy(error = "Upload Failed") }
+            .flowOn(Dispatchers.IO)
+            .catch {
+                _uploadState.update { it.copy(error = "Upload Failed") }
+            }
+            .collect { status ->
+                when (status) {
+                    is UploadStatus.Progress -> _uploadState.update { it.copy(progress = (status.totalBytesSend / status.contentLength).toFloat() * 100) }
+                    is UploadStatus.Success -> _uploadState.update { it.copy(isSuccess = true) }
                 }
-                .collect { status ->
-                    when (status) {
-                        is UploadStatus.Progress -> _uploadState.update { it.copy(progress = (status.totalBytesSend / status.contentLength).toFloat() * 100) }
-                        is UploadStatus.Success -> _uploadState.update { it.copy(isSuccess = true) }
-                    }
-                }
+            }
     }
 
     fun profileUpdateErrorShown() {
         _profileUiState.update { it.copy(error = null) }
     }
 
-    fun resetUploadState(){
+    fun resetUploadState() {
         _uploadState.value = UploadState()
     }
 
@@ -112,7 +116,30 @@ class ProfileViewModel @Inject constructor(
     }
 
     fun modifyUser(email: String = "", password: String = "") = viewModelScope.launch {
-        repository.modifyUser(email, password)
+        val response = if (email.isNotEmpty()) {
+            repository.modifyEmail(email)
+        } else {
+            repository.modifyPassword(password)
+        }
+
+        when (response) {
+            is Response.Error -> {
+                _userModifyState.value = UserModifyState.Error("Update Failed. Try again later!")
+            }
+
+            is Response.Success -> {
+                _userModifyState.value =
+                    if (email.isNotEmpty()) UserModifyState.Email(response.data.newEmail)
+                    else {
+                        val newPassword = response.data.userMetadata?.get("pw").toString()
+                        UserModifyState.Password(newPassword.substring(1, newPassword.length - 1))
+                    }
+            }
+        }
+    }
+
+    fun resetUserModifyState() {
+        _userModifyState.value = null
     }
 
     init {
@@ -122,14 +149,20 @@ class ProfileViewModel @Inject constructor(
 }
 
 data class ProfileUiState(
-        val isLoading: Boolean = false,
-        val profile: Profile? = null,
-        val isLoggedOut: Boolean = false,
-        val error: String? = null
+    val isLoading: Boolean = false,
+    val profile: Profile? = null,
+    val isLoggedOut: Boolean = false,
+    val error: String? = null
 )
 
+sealed class UserModifyState {
+    class Password(val password: String?) : UserModifyState()
+    class Email(val email: String?) : UserModifyState()
+    class Error(val error: String) : UserModifyState()
+}
+
 data class UploadState(
-        val isSuccess: Boolean = false,
-        val progress: Float? = null,
-        val error: String? = null
+    val isSuccess: Boolean = false,
+    val progress: Float? = null,
+    val error: String? = null
 )

@@ -7,6 +7,7 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.MediaController
+import android.widget.Toast
 import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
 import androidx.fragment.app.setFragmentResult
@@ -21,14 +22,17 @@ import com.example.mvpchatapplication.utils.Constants
 import com.example.mvpchatapplication.utils.MessageType
 import com.example.mvpchatapplication.utils.launchAndCollectLatest
 import dagger.hilt.android.AndroidEntryPoint
+import io.github.jan.supabase.storage.UploadStatus
+import io.ktor.client.plugins.api.Send
 
 @AndroidEntryPoint
 class SendMediaFragment : BindingFragment<FragmentSendMediaBinding>() {
 
-    var media: Media? = null
+    private var media: Media? = null
     override val bindingInflater: (LayoutInflater) -> ViewBinding
         get() = FragmentSendMediaBinding::inflate
-
+    private val viewModel by viewModels<SendMediaViewModel>()
+    private val navController by lazy { findNavController() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -50,9 +54,41 @@ class SendMediaFragment : BindingFragment<FragmentSendMediaBinding>() {
             }
         }
         binding.sendBtn.setOnClickListener {
-            media?.let {
+            /*media?.let {
                 setFragmentResult("requestKey", bundleOf("bundleKey" to it))
                 findNavController().popBackStack(R.id.navigation_message, false)
+            }*/
+            media?.let {
+                if (it.type == MessageType.IMAGE) {
+                    viewModel.uploadImage(it)
+                } else if (it.type == MessageType.VIDEO) {
+                    viewModel.uploadVideo(it)
+                }
+            }
+        }
+        viewModel.uploadState.launchAndCollectLatest(viewLifecycleOwner) {
+            when (it) {
+                is UploadState.Error -> {
+                    binding.uploadProgress.isVisible = false
+                    Toast.makeText(requireContext(), "Upload Failed. Try again!", Toast.LENGTH_SHORT).show()
+                    viewModel.uploadErrorShown()
+                }
+                UploadState.Success -> {
+                    binding.uploadProgress.isVisible = false
+                    if (media?.type == MessageType.IMAGE) {
+                        Toast.makeText(requireContext(), "Image has been sent successfully!", Toast.LENGTH_SHORT).show()
+                    } else {
+                        Toast.makeText(requireContext(), "Video has been sent successfully!", Toast.LENGTH_SHORT).show()
+                    }
+                    navController.popBackStack(R.id.navigation_capture_media, true)
+                }
+
+                is UploadState.Uploading -> {
+                    binding.uploadProgress.isVisible = true
+                    binding.uploadProgress.setProgress(it.progress.toInt(), true)
+                }
+
+                null -> {}
             }
         }
     }

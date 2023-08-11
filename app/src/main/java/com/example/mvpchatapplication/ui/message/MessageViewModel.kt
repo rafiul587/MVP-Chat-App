@@ -1,32 +1,29 @@
 package com.example.mvpchatapplication.ui.message
 
-import android.net.Uri
 import android.util.Log
-import androidx.core.net.toFile
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
+import androidx.paging.cachedIn
 import androidx.paging.map
-import com.example.mvpchatapplication.BuildConfig
 import com.example.mvpchatapplication.data.Response
 import com.example.mvpchatapplication.data.models.Media
 import com.example.mvpchatapplication.data.models.Message
-import com.example.mvpchatapplication.utils.MessageType
+import com.example.mvpchatapplication.utils.MessageViewType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.jan.supabase.SupabaseClient
-import io.github.jan.supabase.annotations.SupabaseExperimental
 import io.github.jan.supabase.gotrue.gotrue
+import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.realtime
-import io.github.jan.supabase.storage.UploadStatus
-import io.github.jan.supabase.storage.storage
-import io.github.jan.supabase.storage.uploadAsFlow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -34,7 +31,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
-class ChatViewModel @Inject constructor(
+class MessageViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val repository: MessageRepository,
     private val client: SupabaseClient,
@@ -46,35 +43,71 @@ class ChatViewModel @Inject constructor(
     private var _messageState = MutableStateFlow(MessageState())
     val messages = _messageState.asStateFlow()
 
-    var receiverIdForChat = ""
+    var page = 1
 
-    fun connectRealtime(roomId: Int) = viewModelScope.launch(Dispatchers.IO) {
+    private var recipeListScrollPosition = 0
+
+    private var receiverIdForChat = ""
+    private var chatId = 0
+
+    fun connectRealtime(chatId: Int) = viewModelScope.launch(Dispatchers.IO) {
         kotlin.runCatching {
-            val result = repository.connectRealtime(roomId)
-            /*result
-                .catch { error ->
-                    _chatUiState.update { it.copy(messages = it.messages?.plus(MessageState(isLoading = false, error = error.localizedMessage))) }
+            Log.d("TAG", "connectRealtime222: ")
+            val result = repository.connectRealtime()
+            result
+                .catch {
+                    Log.d("TAG", "connectRealtime: ${it.message}")
+                    _messageState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Message send failed!"
+                        )
+                    }
                 }
                 .onEach {
                     val message = it.decodeRecord<Message>()
-                    _chatUiState.update { it.copy(isLoading = false, messages = it.messages?.plus(
-                        MessageState(isLoading = false, message = message)
-                    )) }
-
-                    if(message.authorId != getMyUid()) {
+                    Log.d("TAG", "connectRealtime: $message")
+                    if (message.authorId != getMyUid()) {
                         setMessageSeenTrue(message.id)
                     }
-                }.launchIn(viewModelScope)*/
+
+                    kotlin.runCatching {
+                        repository.invalidate()
+                    }
+                }.launchIn(viewModelScope)
+        }.onFailure {
+            Log.d("TAG", "connectRealtime failed: ${it.message}")
         }
     }
 
     fun getAllChat(chatId: Int) = viewModelScope.launch {
         _chatUiState.update { it.copy(isLoading = true) }
-        repository.getAllMessages(chatId)
-            .catch {  }
-            .collectLatest { pagingData ->
-            _chatUiState.update { it.copy(isLoading = false, messages = pagingData.map { MessageState(message = it) }) }
+        repository.getAllMessages(chatId).catch {
+            _chatUiState.update { it.copy(isLoading = false, error = "Something went wrong!") }
         }
+            .collectLatest { data ->
+                data.map {
+                    Log.d("TAG", "getAllChat: $it")
+                }
+                _chatUiState.update { it.copy(isLoading = false, messages = data) }
+            }
+    }
+
+
+    private fun incrementPage() {
+        page++
+    }
+
+    fun onChangeRecipeScrollPosition(position: Int) {
+        recipeListScrollPosition = position
+    }
+
+    /**
+     * Called when a new search is executed.
+     */
+    private fun resetSearchState() {
+        page = 0
+        onChangeRecipeScrollPosition(0)
     }
 
     fun insertData(message: Message) = viewModelScope.launch {
@@ -91,7 +124,7 @@ class ChatViewModel @Inject constructor(
 
                 is Response.Success -> {
                     receiverIdForChat = ""
-                    when (val result = repository.insert(message)) {
+                    when (val result = repository.insert(message.copy(chatId = response.data.id))) {
                         is Response.Error -> {
                             _messageState.update {
                                 it.copy(
@@ -106,7 +139,8 @@ class ChatViewModel @Inject constructor(
                 }
             }
         } else {
-            when (val result = repository.insert(message)) {
+            when (val result =
+                repository.insert(if (message.chatId == -1) message.copy(chatId = chatId) else message)) {
                 is Response.Error -> {
                     _messageState.update {
                         it.copy(
@@ -121,44 +155,6 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /*fun connectToRealtime() {
-        viewModelScope.launch {
-            kotlin.runCatching {
-                val realtimeChannel = supabaseClient.realtime.createChannel("#random")
-                supabaseClient.realtime.connect()
-
-                realtimeChannel.postgresChangeFlow<PostgresAction>("public") {
-                    table = "messages"
-                }.onEach {
-                    when (it) {
-                        is PostgresAction.Delete -> {
-
-                        }
-
-                        is PostgresAction.Insert -> {
-                            Log.d("TAG", "connectToRealtime: ${it.decodeRecord<Message>()}")
-                        }
-
-                        is PostgresAction.Select -> error("Select should not be possible")
-                        is PostgresAction.Update -> error("Update should not be possible")
-                    }
-                }.launchIn(viewModelScope)
-
-                realtimeChannel.join()
-
-            }.onFailure {
-                it.printStackTrace()
-            }
-        }
-    }*/
-
-    fun disconnectFromRealtime() {
-        viewModelScope.launch {
-            kotlin.runCatching {
-                client.realtime.disconnect()
-            }
-        }
-    }
 
     fun chatErrorShown() {
         _chatUiState.update { it.copy(error = null) }
@@ -168,14 +164,24 @@ class ChatViewModel @Inject constructor(
         _messageState.update { it.copy(error = null) }
     }
 
-    fun deleteChat(roomId: Int) = viewModelScope.launch {
-        repository.deleteChat(roomId)
+    fun deleteChat(chatId: Int) = viewModelScope.launch {
+        _chatUiState.update { it.copy(isLoading = true) }
+        when (val response = repository.deleteChat(chatId)) {
+            is Response.Error -> {
+                _chatUiState.update { it.copy(isLoading = false, error = "Deletion Failed!") }
+            }
+
+            is Response.Success -> {
+                _chatUiState.update { it.copy(isLoading = false, deleted = true) }
+            }
+        }
     }
 
     fun getChat(receiverId: String) = viewModelScope.launch {
         when (val response = repository.getChat(receiverId)) {
             is Response.Success -> {
                 Log.d("TAG", "getChat: ${response.data}")
+                chatId = response.data.id
                 getAllChat(response.data.id)
                 connectRealtime(response.data.id)
             }
@@ -192,78 +198,26 @@ class ChatViewModel @Inject constructor(
         repository.createChat(receiverId)
     }
 
-/*    @OptIn(SupabaseExperimental::class)
-    fun uploadImage(media: Media, roomId: Int) = viewModelScope.launch {
-        val bucket = client.storage["images"]
-        bucket.uploadAsFlow(media.name, Uri.parse(media.uri).toFile(), upsert = true)
-            .collect { status ->
-                when (status) {
-                    is UploadStatus.Progress -> {
-                        _uploadState.update {
-                            it.copy(
-                                isLoading = false,
-                                progress = (status.totalBytesSend.toFloat() / status.contentLength * 100)
-                            )
-                        }
-                    }
-
-                    is UploadStatus.Success -> {
-                        val url = client.storage["images"].publicUrl(media.name)
-                        insertData(
-                            Message(
-                                content = url,
-                                type = MessageType.IMAGE,
-                                chatId = roomId
-                            )
-                        )
-                    }
-                }
-            }
-    }*/
-
-    @OptIn(SupabaseExperimental::class)
-    fun uploadVideo(media: Media, roomId: Int) = viewModelScope.launch {
-        val bucket = client.storage["videos"]
-        bucket.uploadAsFlow(media.name, Uri.parse(media.uri).toFile(), upsert = true).collect {
-            when (it) {
-                is UploadStatus.Progress -> println("Progress: ${it.totalBytesSend.toFloat() / it.contentLength * 100}%")
-                is UploadStatus.Success -> {
-                    val url = "${BuildConfig.SUPABASE_URL}/storage/v1/object/public/${media.name}"
-                    insertData(
-                        Message(
-                            content = url,
-                            type = MessageType.VIDEO,
-                            chatId = roomId
-                        )
-                    )
-                }
-            }
-        }
-    }
-
-    private fun uploadMediaMessage(message: Message) = viewModelScope.launch {
-        _messageState.update { it.copy(isLoading = true) }
-        repository.insert(message)
-    }
-
     fun getMyUid() = client.gotrue.currentUserOrNull()?.id ?: ""
 
-    fun setMessageSeenTrue(chatId: Int) = viewModelScope.launch {
+    private fun setMessageSeenTrue(chatId: Int) = viewModelScope.launch {
         repository.setMessageSeenTrue(chatId)
+    }
+
+    fun leaveChannel() {
+
+    }
+
+    companion object {
+        const val PAGE_SIZE = 5
     }
 }
 
-data class UploadState(
-    val isLoading: Boolean = false,
-    val progress: Float = 0f,
-    val isSuccess: Boolean = false,
-    val error: String? = null
-)
-
 data class ChatUIState(
     val isLoading: Boolean = false,
-    val messages: PagingData<MessageState>? = null,
-    val error: String? = null
+    val messages: PagingData<MessageViewType>? = null,
+    val error: String? = null,
+    val deleted: Boolean = false
 )
 
 data class MessageState(

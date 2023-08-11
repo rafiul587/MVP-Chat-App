@@ -14,9 +14,12 @@ import io.github.jan.supabase.gotrue.gotrue
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.RealtimeChannel
+import io.github.jan.supabase.realtime.createChannel
 import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.storage.Storage
 import io.github.jan.supabase.storage.storage
+import javax.inject.Qualifier
 import javax.inject.Singleton
 
 @Module
@@ -47,6 +50,21 @@ object AppModule {
 
     @Provides
     @Singleton
+    @ChatChannel
+    fun provideChatChannel(realtime: Realtime): RealtimeChannel {
+        return realtime.createChannel("#chats")
+    }
+
+    @Provides
+    @Singleton
+    @MessageChannel
+    fun
+            provideMessageChannel(realtime: Realtime): RealtimeChannel {
+        return realtime.createChannel("#messages")
+    }
+
+    @Provides
+    @Singleton
     fun provideSupabaseGoTrue(client: SupabaseClient): GoTrue {
         return client.gotrue
     }
@@ -67,3 +85,11 @@ object AppModule {
         fun provideAppDataStore(@ApplicationContext context: Context): AppDataStore =
             AppDataStore(context = context)*/
 }
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class ChatChannel
+
+@Qualifier
+@Retention(AnnotationRetention.BINARY)
+annotation class MessageChannel

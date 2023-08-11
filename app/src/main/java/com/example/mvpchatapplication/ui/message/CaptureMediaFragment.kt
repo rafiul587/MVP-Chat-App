@@ -92,6 +92,15 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
 
     private lateinit var mDetector: GestureDetectorCompat
 
+    private var chatId: Int? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        arguments?.let {
+            chatId = it.getInt("chatId")
+        }
+    }
+
     @SuppressLint("ClickableViewAccessibility")
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -185,9 +194,11 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
         val name = SimpleDateFormat(FILENAME_FORMAT, Locale.getDefault())
             .format(System.currentTimeMillis())
         val extension = ".jpg"
+        val fileName = File.createTempFile("IMG_$name", extension, requireContext().cacheDir)
+        fileName.deleteOnExit()
 
         val fileOutputOptions = ImageCapture.OutputFileOptions
-            .Builder(File.createTempFile("IMG_$name", extension, requireContext().cacheDir))
+            .Builder(fileName)
             .setMetadata(ImageCapture.Metadata().also {
                 it.isReversedHorizontal = CameraSelector.DEFAULT_FRONT_CAMERA == cameraSelector
             }).build()
@@ -202,17 +213,15 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
                     Log.e(TAG, "Photo capture failed: ${exc.message}", exc)
                 }
 
-                override fun
-                        onImageSaved(output: ImageCapture.OutputFileResults) {
+                override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val msg = "Photo capture succeeded: ${output.savedUri}"
-                    Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
                     output.savedUri?.let {
                         val bundle = Bundle()
                         bundle.putParcelable(
                             "media",
                             Media(
                                 type = MessageType.IMAGE,
-                                name = "IMG_$name$extension",
+                                name = "IMG_${chatId}_$name$extension",
                                 uri = it.toString()
                             )
                         )
@@ -256,9 +265,12 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
         val name = SimpleDateFormat(FILENAME_FORMAT, Locale.getDefault())
             .format(System.currentTimeMillis())
         val extension = ".mp4"
-        // create and start a new recording session
+
+        val fileName = File.createTempFile("VID_$name", extension, requireContext().cacheDir)
+        fileName.deleteOnExit()
+
         val fileOutputOptions =
-            FileOutputOptions.Builder(File.createTempFile("VID_$name", extension, requireContext().cacheDir))
+            FileOutputOptions.Builder(fileName)
                 .build()
         recording = videoCapture.output
             .prepareRecording(requireContext(), fileOutputOptions)
@@ -282,15 +294,13 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
                         if (!recordEvent.hasError()) {
                             val msg = "Video capture succeeded: " +
                                     "${recordEvent.outputResults.outputUri}"
-                            Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT)
-                                .show()
                             Log.d(TAG, msg)
                             val bundle = Bundle()
                             bundle.putParcelable(
                                 "media",
                                 Media(
                                     type = MessageType.VIDEO,
-                                    name = "VID_$name",
+                                    name = "VID_${chatId}_$name$extension",
                                     uri = recordEvent.outputResults.outputUri.toString()
                                 )
                             )

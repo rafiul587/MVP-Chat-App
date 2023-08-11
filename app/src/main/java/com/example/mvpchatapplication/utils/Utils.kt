@@ -1,5 +1,6 @@
 package com.example.mvpchatapplication.utils
 
+import android.text.format.DateUtils
 import android.util.Log
 import android.widget.ImageView
 import androidx.lifecycle.Lifecycle
@@ -7,8 +8,6 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.bumptech.glide.Glide
-import com.bumptech.glide.request.RequestOptions
-import com.bumptech.glide.signature.ObjectKey
 import com.example.mvpchatapplication.BuildConfig
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.Response
@@ -26,7 +25,7 @@ import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.Random
+import java.util.TimeZone
 
 /**
  * This is just a wrapper of [Lifecycle.repeatOnLifecycle] for specific use case. This can lead to some unintended behaviour
@@ -35,9 +34,9 @@ import java.util.Random
  */
 
 inline fun <T> Flow<T>.launchAndCollectLatest(
-    owner: LifecycleOwner,
-    minActiveState: Lifecycle.State = Lifecycle.State.STARTED,
-    crossinline action: suspend CoroutineScope.(T) -> Unit
+        owner: LifecycleOwner,
+        minActiveState: Lifecycle.State = Lifecycle.State.STARTED,
+        crossinline action: suspend CoroutineScope.(T) -> Unit
 ) {
     owner.lifecycleScope.launch {
         owner.repeatOnLifecycle(minActiveState) {
@@ -52,19 +51,19 @@ fun ImageView.loadProfileImage(url: String?) {
     Log.d("TAG", "loadProfileImage: ${BuildConfig.SUPABASE_URL}/storage/v1/object/public/profile_images/$url")
     val urlSplit = url?.split("_")
     Glide.with(this)
-        .load("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/profile_images/${urlSplit?.lastOrNull()}?mod=${urlSplit?.firstOrNull() ?: ""}")
-        .override(200)
-        .error(R.drawable.baseline_account_circle_24)
-        .placeholder(R.drawable.icon_park_outline_loading_one)
-        .circleCrop()
-        .into(this)
+            .load("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/profile_images/${urlSplit?.lastOrNull()}?mod=${urlSplit?.firstOrNull() ?: ""}")
+            .override(200)
+            .error(R.drawable.baseline_account_circle_24)
+            .placeholder(R.drawable.icon_park_outline_loading_one)
+            .circleCrop()
+            .into(this)
 }
 
 fun String.isValidEmail() =
-    isNotEmpty() && android.util.Patterns.EMAIL_ADDRESS.matcher(this).matches()
+        isNotEmpty() && android.util.Patterns.EMAIL_ADDRESS.matcher(this).matches()
 
 fun String.isValidPhoneNumber() =
-    isNotEmpty() && android.util.Patterns.EMAIL_ADDRESS.matcher(this).matches()
+        isNotEmpty() && android.util.Patterns.EMAIL_ADDRESS.matcher(this).matches()
 
 @Serializable
 @SerialName("message_type")
@@ -82,7 +81,7 @@ enum class MessageType {
 object DateParser {
     private val dateFormat1: DateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX")
     fun convertDateToString(date: String?): String {
-        if(date == null) return ""
+        if (date == null) return ""
         var strDate = ""
         strDate = dateFormat1.format(date)
         return strDate
@@ -113,15 +112,93 @@ abstract class MessageViewType {
 
 data class MessageContent(val message: Message) : MessageViewType() {
     override fun getType(userId: String): Int {
-        return if (message.authorId === userId) {
+        return if (message.authorId == userId) {
             OWN
         } else OTHERS
     }
 }
 
+
 data class MessageDate(val date: String) : MessageViewType() {
     override fun getType(userId: String): Int {
         return DATE
+    }
+}
+
+fun Date.isYesterday(): Boolean = DateUtils.isToday(this.time + DateUtils.DAY_IN_MILLIS)
+
+fun Date.isToday(): Boolean = DateUtils.isToday(this.time)
+
+
+fun String.toDayOrDateString(): String {
+    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSSZ", Locale.getDefault())
+    sdf.timeZone = TimeZone.getDefault()
+
+    try {
+        val date = sdf.parse(this)
+
+        val currentDate = Date()
+        val timeDifferenceMillis = currentDate.time - (date?.time ?: 0)
+
+        return when  {
+            date.isToday() -> {
+                "Today"
+            }
+            date.isYesterday() -> {
+                "Yesterday"
+            }
+            else -> {
+                val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                formatter.timeZone = TimeZone.getDefault()
+                formatter.format(date)
+            }
+        }
+    } catch (e: Exception) {
+        return ""
+    }
+
+}
+
+fun String.toTimeOrDateString(): String {
+    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSSZ", Locale.getDefault())
+    sdf.timeZone = TimeZone.getDefault()
+
+    try {
+        val date = sdf.parse(this)
+        val currentDate = Date()
+
+        val timeDifferenceMillis = currentDate.time - (date?.time ?: 0)
+
+        return when (timeDifferenceMillis / (24 * 60 * 60 * 1000)) {
+            0L -> {
+                val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
+                formatter.timeZone = TimeZone.getDefault()
+                formatter.format(date!!)
+            }
+
+            1L -> "Yesterday"
+            else -> {
+                val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
+                formatter.timeZone = TimeZone.getDefault()
+                formatter.format(date!!)
+            }
+        }
+    } catch (e: Exception) {
+        return ""
+    }
+
+}
+
+fun String.toTime(): String {
+    val sdf = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSSZ", Locale.getDefault())
+    sdf.timeZone = TimeZone.getDefault()
+    return try {
+        val date = sdf.parse(this)
+        val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
+        formatter.timeZone = TimeZone.getDefault()
+        formatter.format(date!!)
+    } catch (e: Exception) {
+        ""
     }
 }
 
@@ -134,10 +211,9 @@ data class MessageDate(val date: String) : MessageViewType() {
  *
  * @see Response
  */
-suspend fun <T: Any> handleApiResponse(apiCall: suspend () -> T): Response<T> {
+suspend fun <T : Any> handleApiResponse(apiCall: suspend () -> T): Response<T> {
     return withContext(Dispatchers.IO) {
         try {
-            Log.d("TAG", "handleApiResponse: ")
             Response.Success(apiCall())
         } catch (e: Exception) {
             if (BuildConfig.DEBUG) {
@@ -147,4 +223,9 @@ suspend fun <T: Any> handleApiResponse(apiCall: suspend () -> T): Response<T> {
             Response.Error(e)
         }
     }
+}
+
+interface DialogListener {
+    fun onEmailChanged(email: String)
+    fun onPasswordChanged(password: String)
 }
