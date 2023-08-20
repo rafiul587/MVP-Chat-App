@@ -8,17 +8,17 @@ import kotlinx.serialization.Serializable
 data class Chat(
     val id: Int = 0,
     val user1: String? = null,
-    val user2: String,
+    val user2: String? = null,
     @SerialName("last_message_id")
     val lastMessageId: Int? = null,
     @SerialName("last_message_author_id")
-    val lastMessageAuthorId: String? = null,
+    var lastMessageAuthorId: String? = null,
     @SerialName("last_message_content")
-    val lastMessage: String? = null,
+    var lastMessage: String? = null,
     @SerialName("last_message_seen")
     var lastMessageSeen: Boolean? = null,
     @SerialName("last_message_type")
-    val lastMessageType: MessageType? = null,
+    var lastMessageType: MessageType? = null,
     @SerialName("name")
     val otherUserName: String? = null,
     @SerialName("profile_image")

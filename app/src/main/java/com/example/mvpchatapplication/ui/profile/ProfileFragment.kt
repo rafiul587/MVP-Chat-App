@@ -2,13 +2,16 @@ package com.example.mvpchatapplication.ui.profile
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.net.toUri
 import androidx.core.view.isVisible
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
@@ -18,15 +21,19 @@ import androidx.navigation.fragment.findNavController
 import androidx.viewbinding.ViewBinding
 import com.bumptech.glide.Glide
 import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.MainActivity
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Profile
 import com.example.mvpchatapplication.databinding.FragmentProfileBinding
 import com.example.mvpchatapplication.utils.DialogListener
+import com.example.mvpchatapplication.utils.getFileFromScaledBitmap
 import com.example.mvpchatapplication.utils.isDateValid
 import com.example.mvpchatapplication.utils.loadProfileImage
+import com.example.mvpchatapplication.utils.scaleFullBitmap
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.io.File
 
 @AndroidEntryPoint
 class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListener {
@@ -47,8 +54,15 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
                     .load(it)
                     .into(binding.profileImage)
                 binding.uploadProgress.isVisible = true
-                viewModel.uploadProfileImage(it)
-            }
+                val fullBitmap : Bitmap =  MediaStore.Images.Media.getBitmap(requireActivity().contentResolver, it)
+                // 2. Scale down the Bitmap
+                val scaledBitmap : Bitmap = scaleFullBitmap(fullBitmap)
+                // 3. Convert the scaled Bitmap to File to upload to server
+                val scaledFile : File = getFileFromScaledBitmap(requireContext(), scaledBitmap)
+                scaledFile.let {
+                        viewModel.uploadProfileImage(it.toUri())
+                    }
+                }
         }
 
     private val photoPermissionResult =
@@ -205,6 +219,8 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
 
         binding.logout.setOnClickListener {
             viewModel.logOut()
+            (requireContext() as MainActivity).leaveMessageChannel()
+            (requireContext() as MainActivity).leaveChatChannel()
         }
     }
 
@@ -277,4 +293,5 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
     override fun onPasswordChanged(password: String) {
         viewModel.modifyUser(password = password)
     }
+
 }

@@ -4,7 +4,6 @@ import android.app.Dialog
 import android.graphics.Color
 import android.graphics.Insets
 import android.graphics.drawable.ColorDrawable
-import android.media.MediaPlayer.OnPreparedListener
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -20,41 +19,39 @@ import android.widget.Toast
 import android.widget.VideoView
 import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
-import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
-import androidx.paging.LoadState
+import androidx.navigation.navGraphViewModels
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.RecyclerView.OnScrollListener
 import androidx.viewbinding.ViewBinding
 import com.bumptech.glide.Glide
 import com.example.mvpchatapplication.BindingFragment
 import com.example.mvpchatapplication.BuildConfig
+import com.example.mvpchatapplication.MainActivity
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Message
 import com.example.mvpchatapplication.data.models.Profile
-import com.example.mvpchatapplication.databinding.FragmentMessageBinding
+import com.example.mvpchatapplication.databinding.FragmentMessageTestBinding
+import com.example.mvpchatapplication.utils.AdapterNotifyType
 import com.example.mvpchatapplication.utils.MessageContent
 import com.example.mvpchatapplication.utils.MessageDate
 import com.example.mvpchatapplication.utils.MessageType
-import com.example.mvpchatapplication.utils.MessageViewType
 import com.example.mvpchatapplication.utils.loadProfileImage
 import com.google.android.material.progressindicator.CircularProgressIndicator
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChangedBy
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 
 
 @AndroidEntryPoint
-class MessageFragment : BindingFragment<FragmentMessageBinding>(),
+class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
     MessageAdapter.MessageClickListener {
 
-    private val viewModel by viewModels<MessageViewModel>()
+    val viewModel by navGraphViewModels<MessageViewModel>(R.id.navigation_message_graph){defaultViewModelProviderFactory }
     private val navController by lazy { findNavController() }
     private lateinit var messageAdapter: MessageAdapter
 
@@ -62,7 +59,7 @@ class MessageFragment : BindingFragment<FragmentMessageBinding>(),
     private var chatId: Int? = null
 
     override val bindingInflater: (LayoutInflater) -> ViewBinding
-        get() = FragmentMessageBinding::inflate
+        get() = FragmentMessageTestBinding::inflate
     private val toolBarBinding get() = binding.toolBar
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,24 +74,33 @@ class MessageFragment : BindingFragment<FragmentMessageBinding>(),
         setUpStateListeners()
 
         binding.sendBtn.setOnClickListener {
-            val message = binding.editTextMessage.text.trim().toString()
-            if (message.isEmpty()) {
-                return@setOnClickListener
-            }
-            viewModel.insertData(
-                message = Message(
-                    chatId = chatId!!,
-                    content = message,
-                    type = MessageType.TEXT
-                )
-            )
+            sendMessage()
         }
+
         binding.sendMediaFile.setOnClickListener {
             navController.navigate(
                 R.id.action_navigation_chat_to_navigation_capture_media,
-                bundleOf("chatId" to chatId)
+                bundleOf("chatId" to chatId, "receiverId" to receiverProfile!!.id)
             )
         }
+    }
+
+    private fun sendMessage() {
+        val message = binding.editTextMessage.text?.trim().toString()
+        if (message.isEmpty()) {
+            return
+        }
+
+        val seen = viewModel.connectedUsers.contains(PresenceState(receiverProfile!!.id))
+
+        viewModel.insertData(
+            message = Message(
+                chatId = chatId!!,
+                content = message,
+                type = MessageType.TEXT,
+                seen = seen
+            )
+        )
     }
 
     private fun Bundle.initializeBundles() {
@@ -109,52 +115,70 @@ class MessageFragment : BindingFragment<FragmentMessageBinding>(),
             if (chatId == -1) {
                 viewModel.getChat(it.id)
             } else {
-                viewModel.getAllChat(chatId!!)
-                viewModel.connectRealtime(chatId!!)
+                viewModel.getAllMessages(chatId!!, it.id)
+                viewModel.setChatId(chatId!!)
             }
         }
     }
 
 
     private fun setUpStateListeners() {
+
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
-                    viewModel.chatUiState.collectLatest {
+                    viewModel.messageUiState.collectLatest {
                         binding.progressBar.isVisible = it.isLoading
+
                         if (it.deleted) {
                             navController.popBackStack()
                             return@collectLatest
                         }
-                        it.messages?.let { message ->
-                            messageAdapter.submitData(viewLifecycleOwner.lifecycle, message)
+                        if (!it.isLoading && it.messages != null) {
+                            messageAdapter.notifyDataSetChanged()
+                            if (viewModel.lastLoadedItemId == 0 && it.messages.isNotEmpty()) {
+                                scrollToBottom()
+                            }
                         }
 
-                    }
-                }
-                launch {
-                    viewModel.messages.collectLatest {
                         it.error?.let {
                             Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
-                            viewModel.messageErrorShown()
+                            viewModel.messageUiErrorShown()
                         }
                     }
                 }
 
                 launch {
-                    messageAdapter.loadStateFlow
-                        // Only emit when REFRESH LoadState for RemoteMediator changes.
-                        .distinctUntilChangedBy { it.source.refresh }
-                        // Only react to cases where REFRESH completes, such as NotLoading.
-                        .filter { it.source.refresh is LoadState.NotLoading }
-                        // Scroll to top is synchronous with UI updates, even if remote load was
-                        // triggered.
-                        .collect { scrollToBottom() }
+                    viewModel.insertState.collectLatest {
+                        binding.sendBtn.isEnabled = it !is InsertState.Loading
+                        binding.messageSendingBar.isVisible = it is InsertState.Loading
+                        when (it) {
+                            is InsertState.Error -> {
+                                Toast.makeText(
+                                    requireContext(),
+                                    it.error,
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                                viewModel.insertionDone()
+                            }
+
+                            is InsertState.Success -> {
+                                val notifyType = viewModel.addMessage(it.data)
+                                if (notifyType == AdapterNotifyType.MessageWithNewDate) {
+                                    messageAdapter.notifyItemRangeInserted(0, 2)
+                                } else messageAdapter.notifyItemInserted(0)
+
+                                scrollToBottom()
+                                binding.editTextMessage.setText("")
+                                viewModel.insertionDone()
+                            }
+
+                            else -> {}
+                        }
+                    }
                 }
             }
         }
-
-
     }
 
     private fun scrollToBottom() {
@@ -170,7 +194,7 @@ class MessageFragment : BindingFragment<FragmentMessageBinding>(),
             inflateMenu(R.menu.message_menu);
             setOnMenuItemClickListener {
                 if (it.itemId == R.id.deleteChat) {
-                    chatId?.let { chatId -> viewModel.deleteChat(chatId) }
+                    chatId?.let { viewModel.deleteChat() }
                     return@setOnMenuItemClickListener true;
                 }
                 return@setOnMenuItemClickListener false;
@@ -184,10 +208,46 @@ class MessageFragment : BindingFragment<FragmentMessageBinding>(),
     }
 
     private fun initRecyclerView() {
-        messageAdapter = MessageAdapter(this, viewModel.getMyUid())
+        messageAdapter = MessageAdapter(viewModel.messageList, this, viewModel.getMyUid())
+
         binding.messagesRecyclerView.apply {
             adapter = messageAdapter
-            addOnScrollListener(object : OnScrollListener() {})
+            addOnScrollListener(object : OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    super.onScrolled(recyclerView, dx, dy)
+
+                    val layoutManager = recyclerView.layoutManager as LinearLayoutManager
+                    val visibleItemCount = layoutManager.childCount
+                    val totalItemCount = layoutManager.itemCount
+                    val firstVisibleItemPosition = layoutManager.findFirstVisibleItemPosition()
+
+                    if (!viewModel.messageUiState.value.isLoading && !viewModel.isLastPage) {
+                        if (visibleItemCount + firstVisibleItemPosition >= totalItemCount && firstVisibleItemPosition >= 0 && totalItemCount >= viewModel.messageList.size) {
+                            val last = viewModel.messageList.last()
+
+                            val lastMessage = (if (last is MessageDate) {
+                                messageAdapter.messageList[viewModel.messageList.lastIndex - 1]
+                            } else last) as MessageContent
+                            Log.d(
+                                "TAG",
+                                "onScrolled: ${lastMessage.message.createdAt!!}, ${lastMessage.message.id}"
+                            )
+                            viewModel.nextPage(
+                                chatId!!,
+                                lastMessage.message.id
+                            )
+                        }
+                    }
+                }
+            })
+
+            addOnLayoutChangeListener { _, _, _, _, bottom, _, _, _, oldBottom ->
+                if (bottom < oldBottom) {
+                    // Calculate the height of the keyboard or message box
+                    val heightDiff = oldBottom - bottom;
+                    smoothScrollBy(0, heightDiff);
+                }
+            }
         }
     }
 
@@ -204,7 +264,7 @@ class MessageFragment : BindingFragment<FragmentMessageBinding>(),
         val cross = view.findViewById<ImageView>(R.id.cross)!!
         dialog.setContentView(view, binding.root.layoutParams)
         Glide.with(requireContext())
-            .load("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/images/${message.content}")
+            .load("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/images/${message.decryptedContent}")
             .into(image)
         cross.setOnClickListener { dialog.dismiss() }
         dialog.show()
@@ -226,7 +286,7 @@ class MessageFragment : BindingFragment<FragmentMessageBinding>(),
         val mediaController = MediaController(requireContext());
         videoView.setMediaController(mediaController)
         mediaController.setAnchorView(view)
-        videoView.setVideoURI(Uri.parse("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/videos/${message.content}"))
+        videoView.setVideoURI(Uri.parse("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/videos/${message.decryptedContent}"))
         videoView.start()
 
         videoView.setOnPreparedListener { mp ->
@@ -262,8 +322,9 @@ class MessageFragment : BindingFragment<FragmentMessageBinding>(),
         }
     }
 
+
     override fun onDestroy() {
         super.onDestroy()
-        viewModel.leaveChannel()
+        (requireActivity() as MainActivity).leaveMessageChannel()
     }
 }

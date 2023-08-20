@@ -1,6 +1,7 @@
 package com.example.mvpchatapplication.ui.chats
 
 import android.os.Bundle
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.Toast
@@ -11,8 +12,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
-import androidx.paging.LoadState
-import androidx.paging.map
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
 import com.example.mvpchatapplication.BindingFragment
 import com.example.mvpchatapplication.R
@@ -69,9 +70,39 @@ class ChatsFragment : BindingFragment<FragmentChatsBinding>(), ChatsAdapter.OnCh
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     viewModel.chatsUiState.collectLatest {
+                        binding.progressBar.isVisible = it.isLoading
+                        it.error?.let {
+                            Toast.makeText(requireContext(),  it, Toast.LENGTH_SHORT).show()
+                            viewModel.chatErrorMessageShown()
+                        }
                         it.chats?.let {
-                           chatsAdapter
-                            chatsAdapter.submitData(it)
+                            if(viewModel.chatList.isEmpty()){
+                                binding.emptyLayout.isVisible = true
+                                binding.chatsRecyclerView.isVisible = false
+                            }else {
+                                binding.emptyLayout.isVisible = false
+                                binding.chatsRecyclerView.isVisible = true
+                            }
+                            chatsAdapter.notifyDataSetChanged()
+                        }
+
+                        it.chatAction?.let {
+                            when (it) {
+                                is ChatAction.Delete -> {
+                                    chatsAdapter.notifyItemRemoved(it.index)
+                                    viewModel.resetChatAction()
+                                }
+
+                                ChatAction.Insert -> {
+                                    chatsAdapter.notifyItemInserted(0)
+                                    viewModel.resetChatAction()
+                                }
+
+                                ChatAction.Update -> {
+                                    chatsAdapter.notifyDataSetChanged()
+                                    viewModel.resetChatAction()
+                                }
+                            }
                         }
                     }
                 }
@@ -81,6 +112,7 @@ class ChatsFragment : BindingFragment<FragmentChatsBinding>(), ChatsAdapter.OnCh
                         it.profile?.let { profile ->
                             binding.searchResultLayout.isVisible = true
                             if (profile.id.isEmpty()) {
+                                binding.searchResultLayout.isVisible = false
                                 Toast.makeText(
                                     requireContext(),
                                     getString(R.string.error_no_user_found), Toast.LENGTH_SHORT
@@ -88,10 +120,12 @@ class ChatsFragment : BindingFragment<FragmentChatsBinding>(), ChatsAdapter.OnCh
                                 viewModel.resetSearchState()
                             } else {
                                 binding.searchResultLayout.setOnClickListener {
+                                    binding.searchBox.setText("")
+                                    viewModel.resetSearchState()
                                     val bundle = Bundle()
                                     bundle.putParcelable("profile", profile)
                                     navController.navigate(
-                                        R.id.action_navigation_chats_to_navigation_message,
+                                        R.id.action_navigation_chats_to_navigation_message_graph,
                                         bundle
                                     )
                                 }
@@ -111,14 +145,6 @@ class ChatsFragment : BindingFragment<FragmentChatsBinding>(), ChatsAdapter.OnCh
                     }
                 }
 
-                launch {
-                    chatsAdapter.loadStateFlow.collectLatest {
-                        binding.progressBar.isVisible = it.source.refresh is LoadState.Loading
-                        if (it.source.refresh is LoadState.NotLoading && it.append.endOfPaginationReached) {
-                            binding.emptyLayout.isVisible = chatsAdapter.itemCount < 1
-                        }
-                    }
-                }
             }
         }
     }
@@ -134,25 +160,45 @@ class ChatsFragment : BindingFragment<FragmentChatsBinding>(), ChatsAdapter.OnCh
     }
 
     private fun initRecyclerView() {
-        chatsAdapter = ChatsAdapter(this, viewModel.getMyUid())
+        chatsAdapter = ChatsAdapter(viewModel.chatList, this, viewModel.getMyUid())
         binding.chatsRecyclerView.apply {
             adapter = chatsAdapter
+            addOnScrollListener(object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    super.onScrolled(recyclerView, dx, dy)
+
+                    val layoutManager = recyclerView.layoutManager as LinearLayoutManager
+                    val visibleItemCount = layoutManager.childCount
+                    val totalItemCount = layoutManager.itemCount
+                    val firstVisibleItemPosition = layoutManager.findFirstVisibleItemPosition()
+
+                    if (!viewModel.chatsUiState.value.isLoading && !viewModel.isLastPage) {
+                        if (visibleItemCount + firstVisibleItemPosition >= totalItemCount && firstVisibleItemPosition >= 0 && totalItemCount >= viewModel.chatList.size) {
+                            val lastChat = viewModel.chatList.last()
+                            Log.d("TAG", "onScrolled: ${lastChat.id}")
+                            viewModel.nextPage(lastChat.id)
+                        }
+                    }
+                }
+            })
         }
     }
 
     override fun onChatClick(position: Int) {
-        val chat = chatsAdapter.peek(position)
-        chat?.let {
-            if (it.lastMessageAuthorId != viewModel.getMyUid()) {
-                viewModel.setMessageSeenTrue(it.lastMessageId!!)
-            }
-            val otherUserId = if(it.user1 == viewModel.getMyUid()) it.user2 else it.user1
-            val profile =
-                Profile(id = otherUserId!!, name = it.otherUserName, profileImageUrl = it.otherUserProfileImage)
-            navController.navigate(
-                R.id.action_navigation_chats_to_navigation_message,
-                bundleOf("chatId" to it.id, "profile" to profile)
-            )
+        val chat = viewModel.chatList[position]
+        if (chat.lastMessageAuthorId != viewModel.getMyUid()) {
+            viewModel.setMessageSeenTrue(chat.lastMessageId!!)
         }
+        val otherUserId = if (chat.user1 == viewModel.getMyUid()) chat.user2 else chat.user1
+        val profile =
+            Profile(
+                id = otherUserId!!,
+                name = chat.otherUserName,
+                profileImageUrl = chat.otherUserProfileImage
+            )
+        navController.navigate(
+            R.id.action_navigation_chats_to_navigation_message_graph,
+            bundleOf("chatId" to chat.id, "profile" to profile)
+        )
     }
 }

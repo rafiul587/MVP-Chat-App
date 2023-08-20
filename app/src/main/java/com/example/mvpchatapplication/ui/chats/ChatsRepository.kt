@@ -14,6 +14,7 @@ import com.example.mvpchatapplication.utils.handleApiResponse
 import dagger.hilt.android.scopes.ViewModelScoped
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.RealtimeChannel
@@ -29,32 +30,25 @@ class ChatsRepository @Inject constructor(
     @ChatChannel
     private val chatChannel: RealtimeChannel,
 ) {
-    private lateinit var pagingSource: ChatsPagingSource
-    fun getAllChatRooms(): Flow<PagingData<Chat>> {
-        return Pager(
-            config = PagingConfig(
-                pageSize = MessageRepository.PAGE_SIZE,
-                enablePlaceholders = false,
-                prefetchDistance = 5,
-                initialLoadSize = 30
-            ),
-            pagingSourceFactory = {
-                pagingSource = ChatsPagingSource(postgrest)
-                pagingSource
-            }
-        ).flow
-    }
 
-    fun invalidate() {
-        pagingSource.invalidate()
+    suspend fun getAllChats(lastChatId: Int): Response<List<Chat>> {
+        return handleApiResponse {
+            postgrest.from("inbox").select() {
+                order("updated_at", Order.DESCENDING)
+                if (lastChatId > 0) {
+                    lt("id", lastChatId)
+                }
+                limit(PAGE_SIZE.toLong())
+            }.decodeList()
+        }
     }
 
     suspend fun connectRealtime(): Flow<PostgresAction> {
 
-                val flow = chatChannel.postgresChangeFlow<PostgresAction>("public") {
-                    table = "chats"
-                }
-                chatChannel.join()
+        val flow = chatChannel.postgresChangeFlow<PostgresAction>("public") {
+            table = "chats"
+        }
+        chatChannel.join()
 
         return flow
     }
@@ -84,10 +78,22 @@ class ChatsRepository @Inject constructor(
 
     suspend fun getMessageById(messageId: Int): Response<Message> {
         return handleApiResponse {
-            postgrest["messages"].select() {
+            postgrest["decrypted_messages"].select() {
                 limit(1)
                 eq("id", messageId)
             }.decodeSingle()
         }
+    }
+
+    suspend fun getProfileById(otherUserId: String): Response<Profile> {
+        return handleApiResponse {
+            postgrest["profiles"].select(){
+                eq("id", otherUserId)
+            }.decodeSingle()
+        }
+    }
+
+    companion object {
+        const val PAGE_SIZE = 30
     }
 }

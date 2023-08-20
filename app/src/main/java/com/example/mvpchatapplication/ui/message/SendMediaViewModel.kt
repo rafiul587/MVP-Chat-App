@@ -22,10 +22,8 @@ class SendMediaViewModel @Inject constructor(
         private val client: SupabaseClient,
 ) : ViewModel() {
 
-
     private var _uploadState = MutableStateFlow<UploadState?>(null)
     val uploadState = _uploadState.asStateFlow()
-
 
     @OptIn(SupabaseExperimental::class)
     fun uploadImage(media: Media) = viewModelScope.launch {
@@ -67,10 +65,4 @@ class SendMediaViewModel @Inject constructor(
         _uploadState.value = null
     }
 
-}
-
-sealed class UploadState {
-    object Success : UploadState()
-    class Uploading(val progress: Float = 0f) : UploadState()
-    class Error(val error: String) : UploadState()
 }

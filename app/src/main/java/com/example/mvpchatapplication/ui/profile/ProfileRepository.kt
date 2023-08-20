@@ -1,5 +1,6 @@
 package com.example.mvpchatapplication.ui.profile
 
+import android.content.SharedPreferences
 import android.net.Uri
 import android.util.Log
 import com.example.mvpchatapplication.data.Response
@@ -19,20 +20,20 @@ import kotlinx.serialization.serializer
 import javax.inject.Inject
 
 class ProfileRepository @Inject constructor(
-        private val storage: Storage,
-        private val goTrue: GoTrue,
-        private val postgrest: Postgrest,
-        private val realtime: Realtime
+    private val storage: Storage,
+    private val goTrue: GoTrue,
+    private val postgrest: Postgrest,
+    private val realtime: Realtime,
 ) {
     private val uid = goTrue.currentUserOrNull()?.id
 
     suspend fun getUserProfile(): Response<Profile> {
         return handleApiResponse {
             postgrest.from("profiles")
-                    .select() {
-                        eq("id", uid!!)
-                    }
-                    .decodeSingle()
+                .select() {
+                    eq("id", uid!!)
+                }
+                .decodeSingle()
         }
     }
 
@@ -42,8 +43,11 @@ class ProfileRepository @Inject constructor(
                 set("name", profile.name)
                 set("phone", profile.phone)
                 set("birthday", profile.birthday)
-                Log.d("TAG", "updateProfile: ${profile.name}, ${profile.phone}, ${profile.birthday}")
-            }){
+                Log.d(
+                    "TAG",
+                    "updateProfile: ${profile.name}, ${profile.phone}, ${profile.birthday}"
+                )
+            }) {
                 eq("id", uid!!)
             }.decodeSingle()
         }
@@ -52,7 +56,7 @@ class ProfileRepository @Inject constructor(
     @OptIn(SupabaseExperimental::class)
     fun uploadProfileImage(uri: Uri): Flow<UploadStatus> {
         return storage["profile_images"]
-                .uploadAsFlow("$uid.jpg", uri, upsert = true)
+            .uploadAsFlow("$uid.jpg", uri, upsert = true)
     }
 
     suspend fun logOut(): Response<Unit> {
@@ -88,7 +92,7 @@ class ProfileRepository @Inject constructor(
     suspend fun getPassword(): Response<String> {
         return handleApiResponse {
             goTrue.retrieveUserForCurrentSession(false).userMetadata?.getValue("pw")
-                    .toString()
+                .toString()
         }
     }
 }

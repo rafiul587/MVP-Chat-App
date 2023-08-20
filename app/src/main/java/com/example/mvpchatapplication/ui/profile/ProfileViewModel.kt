@@ -80,7 +80,9 @@ class ProfileViewModel @Inject constructor(
             .collect { status ->
                 when (status) {
                     is UploadStatus.Progress -> _uploadState.update { it.copy(progress = (status.totalBytesSend / status.contentLength).toFloat() * 100) }
-                    is UploadStatus.Success -> _uploadState.update { it.copy(isSuccess = true) }
+                    is UploadStatus.Success -> {
+                        _uploadState.update { it.copy(isSuccess = true) }
+                    }
                 }
             }
     }
@@ -137,6 +139,8 @@ class ProfileViewModel @Inject constructor(
             }
         }
     }
+
+
 
     fun resetUserModifyState() {
         _userModifyState.value = null

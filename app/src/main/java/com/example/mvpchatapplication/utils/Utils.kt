@@ -1,5 +1,11 @@
 package com.example.mvpchatapplication.utils
 
+import android.content.Context
+import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
+import android.provider.MediaStore
 import android.text.format.DateUtils
 import android.util.Log
 import android.widget.ImageView
@@ -12,6 +18,7 @@ import com.example.mvpchatapplication.BuildConfig
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.Response
 import com.example.mvpchatapplication.data.models.Message
+import com.example.mvpchatapplication.ui.message.CaptureMediaFragment
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -20,12 +27,18 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
+import java.io.IOException
 import java.text.DateFormat
 import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+
 
 /**
  * This is just a wrapper of [Lifecycle.repeatOnLifecycle] for specific use case. This can lead to some unintended behaviour
@@ -110,6 +123,17 @@ abstract class MessageViewType {
     abstract fun getType(userId: String): Int
 }
 
+enum class AdapterNotifyType {
+    MessageWithNewDate,
+    MessageOfExistingDate
+}
+
+sealed class MessageLoadStatus {
+    data class Success(val chatId: Int): MessageLoadStatus()
+    data class Failed(val receiverId: String): MessageLoadStatus()
+    data class NotFound(val receiverId: String): MessageLoadStatus()
+}
+
 data class MessageContent(val message: Message) : MessageViewType() {
     override fun getType(userId: String): Int {
         return if (message.authorId == userId) {
@@ -137,9 +161,6 @@ fun String.toDayOrDateString(): String {
     try {
         val date = sdf.parse(this)
 
-        val currentDate = Date()
-        val timeDifferenceMillis = currentDate.time - (date?.time ?: 0)
-
         return when  {
             date.isToday() -> {
                 "Today"
@@ -165,22 +186,20 @@ fun String.toTimeOrDateString(): String {
 
     try {
         val date = sdf.parse(this)
-        val currentDate = Date()
 
-        val timeDifferenceMillis = currentDate.time - (date?.time ?: 0)
-
-        return when (timeDifferenceMillis / (24 * 60 * 60 * 1000)) {
-            0L -> {
+        return when {
+            date.isToday() -> {
                 val formatter = SimpleDateFormat("HH:mm", Locale.getDefault())
                 formatter.timeZone = TimeZone.getDefault()
                 formatter.format(date!!)
             }
-
-            1L -> "Yesterday"
+            date.isYesterday() -> {
+                "Yesterday"
+            }
             else -> {
                 val formatter = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
                 formatter.timeZone = TimeZone.getDefault()
-                formatter.format(date!!)
+                formatter.format(date)
             }
         }
     } catch (e: Exception) {
@@ -200,6 +219,83 @@ fun String.toTime(): String {
     } catch (e: Exception) {
         ""
     }
+}
+
+fun saveFileBitmapToFile(file: File): File? {
+    return try {
+
+        // BitmapFactory options to downsize the image
+        val o = BitmapFactory.Options()
+        o.inJustDecodeBounds = true
+        o.inSampleSize = 6
+        // factor of downsizing the image
+        var inputStream = FileInputStream(file)
+        //Bitmap selectedBitmap = null;
+        BitmapFactory.decodeStream(inputStream, null, o)
+        inputStream.close()
+
+        // The new size we want to scale to
+        val REQUIRED_SIZE = 75
+
+        // Find the correct scale value. It should be the power of 2.
+        var scale = 1
+        while (o.outWidth / scale / 2 >= REQUIRED_SIZE &&
+            o.outHeight / scale / 2 >= REQUIRED_SIZE
+        ) {
+            scale *= 2
+        }
+        val o2 = BitmapFactory.Options()
+        o2.inSampleSize = scale
+        inputStream = FileInputStream(file)
+        val selectedBitmap = BitmapFactory.decodeStream(inputStream, null, o2)
+        inputStream.close()
+
+        // here i override the original image file
+        file.createNewFile()
+        val outputStream = FileOutputStream(file)
+        selectedBitmap!!.compress(Bitmap.CompressFormat.JPEG, 100, outputStream)
+        file
+    } catch (e: Exception) {
+        null
+    }
+}
+
+fun scaleFullBitmap(fullSizeBitmap: Bitmap): Bitmap
+{
+    // assuming that on average the size of the images is 2.5 MB,
+    // we would like to down scale it to ~250 KB
+    val dividingScale = 8
+    val scaledWidth : Int = fullSizeBitmap.width / dividingScale
+    val scaledHeight : Int = fullSizeBitmap.height / dividingScale
+
+    return Bitmap.createScaledBitmap(fullSizeBitmap, scaledWidth, scaledHeight, true)
+}
+
+fun getFileFromScaledBitmap(context: Context, reducedBitmap: Bitmap): File
+{
+    /*
+     compress method takes quality as one of the parameters.
+     For quality, the range of value expected is 0 - 100 where,
+     0 - compress for a smaller size, 100 - compress for max quality.
+    */
+    val byteArrayOutputStream = ByteArrayOutputStream()
+    reducedBitmap.compress(Bitmap.CompressFormat.JPEG, 100, byteArrayOutputStream)
+    val bitmapData = byteArrayOutputStream.toByteArray()
+
+    val name = SimpleDateFormat(CaptureMediaFragment.FILENAME_FORMAT, Locale.getDefault())
+        .format(System.currentTimeMillis())
+    val extension = ".jpg"
+    val file = File.createTempFile("IMG_$name", extension, context.cacheDir)
+    file.deleteOnExit()
+    try {
+        val fileOutputStream = FileOutputStream(file)
+        fileOutputStream.write(bitmapData)
+        fileOutputStream.flush()
+        fileOutputStream.close()
+    }catch(ex : IOException){
+        // Don't just print stack trace, do something meaningful! :D
+    }
+    return file
 }
 
 /**

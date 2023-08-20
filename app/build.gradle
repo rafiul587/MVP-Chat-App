@@ -90,5 +90,5 @@ dependencies {
     implementation "androidx.camera:camera-extensions:${camerax_version}"
     implementation 'com.github.chrisbanes:PhotoView:2.3.0'
     def paging_version = "3.2.0"
-    implementation "androidx.paging:paging-runtime:$paging_version"
+    implementation "androidx.paging:paging-runtime-ktx:$paging_version"
 }

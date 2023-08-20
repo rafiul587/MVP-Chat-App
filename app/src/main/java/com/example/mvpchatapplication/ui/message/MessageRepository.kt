@@ -17,7 +17,6 @@ import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.PostgrestResult
 import io.github.jan.supabase.postgrest.query.Returning
 import io.github.jan.supabase.realtime.PostgresAction
-import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.RealtimeChannel
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import kotlinx.coroutines.Dispatchers
@@ -27,26 +26,25 @@ import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 class MessageRepository @Inject constructor(
-        private val postgrest: Postgrest,
-        private val realtime: Realtime,
-        @MessageChannel
-        private val messageChannel: RealtimeChannel,
+    private val postgrest: Postgrest,
+    @MessageChannel
+    private val messageChannel: RealtimeChannel,
 ) {
 
     private lateinit var pagingSource: MessagesPagingSource
 
-    fun getAllMessages(chatId: Int): Flow<PagingData<MessageViewType>> {
+    fun getAllChats(chatId: Int): Flow<PagingData<MessageViewType>> {
         return Pager(
-                config = PagingConfig(
-                        pageSize = PAGE_SIZE,
-                        enablePlaceholders = false,
-                        prefetchDistance = 5,
-                        initialLoadSize = 30
-                ),
-                pagingSourceFactory = {
-                    pagingSource = MessagesPagingSource(postgrest, chatId)
-                    pagingSource
-                }
+            config = PagingConfig(
+                pageSize = PAGE_SIZE,
+                enablePlaceholders = false,
+                prefetchDistance = 5,
+                initialLoadSize = 30
+            ),
+            pagingSourceFactory = {
+                pagingSource = MessagesPagingSource(postgrest, chatId)
+                pagingSource
+            }
         ).flow
     }
 
@@ -56,33 +54,30 @@ class MessageRepository @Inject constructor(
         }
     }
 
-    suspend fun getAllChat(chatId: Int, page: Int, pageSize: Int): Response<List<Message>> {
-        return withContext(Dispatchers.IO) {
-            try {
-                val startIndex = page * pageSize
-                val endIndex = startIndex + pageSize - 1
-                val messages = postgrest["messages"]
-                        .select(
-                                Columns.raw("""*, profiles (id, profile_image)"""),
-                                filter = {
-                                    order("created_at", Order.DESCENDING)
-                                    eq("chat_id", chatId)
-                                    range(startIndex.toLong(), endIndex.toLong())
-                                }
-                        )
-                        .decodeList<Message>()
-                Response.Success(messages)
-            } catch (e: Exception) {
-                e.printStackTrace()
-                Response.Error(e)
-            }
+    suspend fun getAllMessages(
+        chatId: Int,
+        lastMessageId: Int = 0
+    ): Response<List<Message>> {
+        return handleApiResponse {
+            postgrest["decrypted_messages"]
+                .select(
+                    Columns.raw("""*, profiles (id, profile_image)"""),
+                    filter = {
+                        order("created_at", Order.DESCENDING)
+                        eq("chat_id", chatId)
+                        if (lastMessageId > 0) {
+                            lt("id", lastMessageId)
+                        }
+                        limit(PAGE_SIZE.toLong())
+                    })
+                .decodeList()
         }
     }
 
-    suspend fun connectRealtime(): Flow<PostgresAction.Insert> {
+    fun connectRealtime(): Flow<PostgresAction.Insert> {
         Log.d("TAG", "connectRealtime: message ")
         val flow = messageChannel.postgresChangeFlow<PostgresAction.Insert>("public") {
-            table = "messages"
+            table = "decrypted_messages"
         }.flowOn(Dispatchers.IO)
         return flow
     }
@@ -90,7 +85,7 @@ class MessageRepository @Inject constructor(
     suspend fun insert(message: Message): Response<PostgrestResult> {
         return handleApiResponse {
             postgrest.from("messages")
-                    .insert(message, returning = Returning.MINIMAL)
+                .insert(message, returning = Returning.MINIMAL)
         }
     }
 
@@ -106,12 +101,12 @@ class MessageRepository @Inject constructor(
         return withContext(Dispatchers.IO) {
             try {
                 val chat = postgrest["chats"]
-                        .select {
-                            or {
-                                eq("user1", receiverId)
-                                eq("user2", receiverId)
-                            }
-                        }.decodeSingle<Chat>()
+                    .select {
+                        or {
+                            eq("user1", receiverId)
+                            eq("user2", receiverId)
+                        }
+                    }.decodeSingle<Chat>()
                 Response.Success(chat)
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -123,22 +118,36 @@ class MessageRepository @Inject constructor(
     suspend fun createChat(receiverId: String): Response<Chat> {
         return handleApiResponse {
             postgrest.from("chats").insert(
-                    Chat(id = 0, user2 = receiverId),
+                Chat(id = 0, user2 = receiverId),
             ).decodeSingle()
         }
     }
 
     suspend fun setMessageSeenTrue(chatId: Int) {
         postgrest["messages"].update(
-                {
-                    set("seen", true)
-                }
+            {
+                set("seen", true)
+            }
         ) {
             eq("id", chatId)
         }
     }
 
+    suspend fun getMessageById(messageId: Int): Response<Message> {
+        return handleApiResponse {
+            postgrest["decrypted_messages"]
+                .select(
+                    Columns.raw("""*, profiles (id, profile_image)"""),
+                    filter = {
+                        order("created_at", Order.DESCENDING)
+                        eq("id", messageId)
+                        limit(1)
+                    })
+                .decodeSingle()
+        }
+    }
+
     companion object {
-        const val PAGE_SIZE = 15
+        const val PAGE_SIZE = 30
     }
 }

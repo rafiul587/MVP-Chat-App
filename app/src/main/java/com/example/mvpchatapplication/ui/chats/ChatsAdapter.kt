@@ -3,7 +3,6 @@ package com.example.mvpchatapplication.ui.chats
 import android.view.LayoutInflater
 import android.view.ViewGroup
 import androidx.core.view.isVisible
-import androidx.paging.PagingDataAdapter
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.RecyclerView
 import com.example.mvpchatapplication.R
@@ -14,9 +13,10 @@ import com.example.mvpchatapplication.utils.loadProfileImage
 import com.example.mvpchatapplication.utils.toTimeOrDateString
 
 class ChatsAdapter(
-        val listener: OnChatClickListener,
-        val myUid: String
-) : PagingDataAdapter<Chat, ChatsAdapter.ChatViewHolder>(ChatDiffCallback()) {
+    private val chatList: List<Chat>,
+    val listener: OnChatClickListener,
+    val myUid: String
+) : RecyclerView.Adapter<ChatsAdapter.ChatViewHolder>() {
 
     interface OnChatClickListener {
         fun onChatClick(position: Int)
@@ -28,13 +28,13 @@ class ChatsAdapter(
     }
 
     override fun onBindViewHolder(holder: ChatViewHolder, position: Int) {
-        val chat = getItem(position)
-        chat?.let { holder.bind(it) }
+        val chat = chatList[position]
+        holder.bind(chat)
     }
 
 
     inner class ChatViewHolder(private val binding: ItemChatBinding) :
-            RecyclerView.ViewHolder(binding.root) {
+        RecyclerView.ViewHolder(binding.root) {
 
         fun bind(chat: Chat) {
             // Bind chat data to the views in the item layout
@@ -79,8 +79,12 @@ class ChatsAdapter(
     }
 
     fun updateSeenStatusTrue(position: Int) {
-        snapshot()[position]?.lastMessageSeen = true
+        chatList[position].lastMessageSeen = true
         notifyItemChanged(position)
+    }
+
+    override fun getItemCount(): Int {
+        return chatList.size
     }
 
     class ChatDiffCallback : DiffUtil.ItemCallback<Chat>() {

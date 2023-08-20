@@ -10,21 +10,13 @@
         android:label="@string/title_chats"
         tools:layout="@layout/fragment_chats">
         <action
-            android:id="@+id/action_navigation_chats_to_navigation_message"
-            app:destination="@id/navigation_message" />
+            android:id="@+id/action_navigation_chats_to_navigation_message_graph"
+            app:destination="@id/navigation_message_graph" />
         <action
             android:id="@+id/action_navigation_chats_to_navigation_profile"
             app:destination="@id/navigation_profile" />
     </fragment>
-    <fragment
-        android:id="@+id/navigation_message"
-        android:name="com.example.mvpchatapplication.ui.chatstest.MessageTestFragment"
-        android:label="@string/title_chat"
-        tools:layout="@layout/fragment_message">
-        <action
-            android:id="@+id/action_navigation_chat_to_navigation_capture_media"
-            app:destination="@id/navigation_capture_media" />
-    </fragment>
+
     <fragment
         android:id="@+id/navigation_profile"
         android:name="com.example.mvpchatapplication.ui.profile.ProfileFragment"
@@ -63,7 +55,7 @@
             app:destination="@id/navigation_sign_up" />
         <action
             android:id="@+id/action_navigation_sign_in_to_navigation_chats"
-            app:destination="@id/navigation_chats"/>
+            app:destination="@id/navigation_chats" />
         <action
             android:id="@+id/action_navigation_sign_in_to_navigation_password_reset"
             app:destination="@id/navigation_password_reset" />
@@ -72,18 +64,32 @@
         android:id="@+id/navigation_password_reset"
         android:name="com.example.mvpchatapplication.ui.passwordreset.PasswordResetFragment"
         tools:layout="@layout/fragment_password_reset" />
-    <fragment
-        android:id="@+id/navigation_capture_media"
-        android:name="com.example.mvpchatapplication.ui.message.CaptureMediaFragment"
-        android:label="@string/title_capture_media"
-        tools:layout="@layout/fragment_send_media">
-        <action
-            android:id="@+id/action_navigation_capture_media_to_navigation_send_media"
-            app:destination="@id/navigation_send_media" />
-    </fragment>
-    <fragment
-        android:id="@+id/navigation_send_media"
-        android:name="com.example.mvpchatapplication.ui.message.SendMediaFragment"
-        android:label="@string/title_send_media"
-        tools:layout="@layout/fragment_send_media" />
+
+    <navigation
+        android:id="@+id/navigation_message_graph"
+        app:startDestination="@+id/navigation_message">
+        <fragment
+            android:id="@+id/navigation_message"
+            android:name="com.example.mvpchatapplication.ui.message.MessageFragment"
+            android:label="@string/title_chat"
+            tools:layout="@layout/fragment_message">
+            <action
+                android:id="@+id/action_navigation_chat_to_navigation_capture_media"
+                app:destination="@id/navigation_capture_media" />
+        </fragment>
+        <fragment
+            android:id="@+id/navigation_capture_media"
+            android:name="com.example.mvpchatapplication.ui.message.CaptureMediaFragment"
+            android:label="@string/title_capture_media"
+            tools:layout="@layout/fragment_send_media">
+            <action
+                android:id="@+id/action_navigation_capture_media_to_navigation_send_media"
+                app:destination="@id/navigation_send_media" />
+        </fragment>
+        <fragment
+            android:id="@+id/navigation_send_media"
+            android:name="com.example.mvpchatapplication.ui.message.SendMediaFragment"
+            android:label="@string/title_send_media"
+            tools:layout="@layout/fragment_send_media" />
+    </navigation>
 </navigation>

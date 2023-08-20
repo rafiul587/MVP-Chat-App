@@ -8,39 +8,43 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.MediaController
 import android.widget.Toast
-import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
-import androidx.fragment.app.setFragmentResult
-import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
+import androidx.navigation.navGraphViewModels
 import androidx.viewbinding.ViewBinding
 import com.example.mvpchatapplication.BindingFragment
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Media
+import com.example.mvpchatapplication.data.models.Message
 import com.example.mvpchatapplication.databinding.FragmentSendMediaBinding
-import com.example.mvpchatapplication.utils.Constants
 import com.example.mvpchatapplication.utils.MessageType
 import com.example.mvpchatapplication.utils.launchAndCollectLatest
 import dagger.hilt.android.AndroidEntryPoint
-import io.github.jan.supabase.storage.UploadStatus
-import io.ktor.client.plugins.api.Send
 
 @AndroidEntryPoint
 class SendMediaFragment : BindingFragment<FragmentSendMediaBinding>() {
 
     private var media: Media? = null
+    private var receiverId: String? = null
+    private var chatId: Int? = null
     override val bindingInflater: (LayoutInflater) -> ViewBinding
         get() = FragmentSendMediaBinding::inflate
-    private val viewModel by viewModels<SendMediaViewModel>()
+    private val viewModel by navGraphViewModels<MessageViewModel>(R.id.navigation_message_graph){defaultViewModelProviderFactory }
     private val navController by lazy { findNavController() }
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         arguments?.let {
+
             media = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 it.getParcelable("media", Media::class.java)
             } else it.getParcelable("media")
+
+            receiverId = it.getString("receiverId", "")
+            chatId = it.getInt("chatId", 0)
+
             Log.d("TAG", "onCreate: $media")
+
         }
     }
 
@@ -54,10 +58,7 @@ class SendMediaFragment : BindingFragment<FragmentSendMediaBinding>() {
             }
         }
         binding.sendBtn.setOnClickListener {
-            /*media?.let {
-                setFragmentResult("requestKey", bundleOf("bundleKey" to it))
-                findNavController().popBackStack(R.id.navigation_message, false)
-            }*/
+
             media?.let {
                 if (it.type == MessageType.IMAGE) {
                     viewModel.uploadImage(it)
@@ -66,21 +67,64 @@ class SendMediaFragment : BindingFragment<FragmentSendMediaBinding>() {
                 }
             }
         }
+        viewModel.insertState.launchAndCollectLatest(viewLifecycleOwner) {
+            when (it) {
+                is InsertState.Error -> {
+                    binding.uploadProgress.isVisible = false
+                    Toast.makeText(
+                        requireContext(),
+                        "Message send Failed. Try again!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    viewModel.insertionDone()
+                }
+
+                is InsertState.Success -> {
+                    binding.uploadProgress.isVisible = false
+                    if (media?.type == MessageType.IMAGE) {
+                        Toast.makeText(
+                            requireContext(),
+                            "Image has been sent successfully!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    } else {
+                        Toast.makeText(
+                            requireContext(),
+                            "Video has been sent successfully!",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    navController.popBackStack(R.id.navigation_capture_media, true)
+                }
+
+                else -> {}
+            }
+        }
         viewModel.uploadState.launchAndCollectLatest(viewLifecycleOwner) {
             when (it) {
                 is UploadState.Error -> {
                     binding.uploadProgress.isVisible = false
-                    Toast.makeText(requireContext(), "Upload Failed. Try again!", Toast.LENGTH_SHORT).show()
-                    viewModel.uploadErrorShown()
+                    Toast.makeText(
+                        requireContext(),
+                        "Upload Failed. Try again!",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    viewModel.uploadDone()
                 }
+
                 UploadState.Success -> {
-                    binding.uploadProgress.isVisible = false
-                    if (media?.type == MessageType.IMAGE) {
-                        Toast.makeText(requireContext(), "Image has been sent successfully!", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(requireContext(), "Video has been sent successfully!", Toast.LENGTH_SHORT).show()
-                    }
-                    navController.popBackStack(R.id.navigation_capture_media, true)
+
+                    val seen = viewModel.connectedUsers.contains(PresenceState(receiverId!!))
+
+                    val message = Message(
+                        authorId = viewModel.getMyUid(),
+                        decryptedContent = media!!.name,
+                        type = media!!.type,
+                        chatId = chatId!!,
+                        seen = seen
+                    )
+                    viewModel.insertData(message)
+                    viewModel.uploadDone()
                 }
 
                 is UploadState.Uploading -> {
@@ -88,7 +132,7 @@ class SendMediaFragment : BindingFragment<FragmentSendMediaBinding>() {
                     binding.uploadProgress.setProgress(it.progress.toInt(), true)
                 }
 
-                null -> {}
+                else -> {}
             }
         }
     }

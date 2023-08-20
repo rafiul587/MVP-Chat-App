@@ -28,6 +28,7 @@ import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
+import androidx.core.os.bundleOf
 import androidx.core.view.GestureDetectorCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
@@ -93,11 +94,13 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
     private lateinit var mDetector: GestureDetectorCompat
 
     private var chatId: Int? = null
+    private var receiverId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         arguments?.let {
-            chatId = it.getInt("chatId")
+            chatId = it.getInt("chatId", 0)
+            receiverId = it.getString("receiverId", "")
         }
     }
 
@@ -216,15 +219,16 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
                 override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                     val msg = "Photo capture succeeded: ${output.savedUri}"
                     output.savedUri?.let {
-                        val bundle = Bundle()
-                        bundle.putParcelable(
-                            "media",
-                            Media(
+                        val bundle = bundleOf(
+                            "media" to Media(
                                 type = MessageType.IMAGE,
-                                name = "IMG_${chatId}_$name$extension",
+                                name = "IMG_$name$extension",
                                 uri = it.toString()
-                            )
+                            ),
+                            "receiverId" to receiverId,
+                            "chatId" to chatId
                         )
+
                         findNavController().navigate(
                             R.id.action_navigation_capture_media_to_navigation_send_media,
                             bundle
@@ -295,15 +299,16 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
                             val msg = "Video capture succeeded: " +
                                     "${recordEvent.outputResults.outputUri}"
                             Log.d(TAG, msg)
-                            val bundle = Bundle()
-                            bundle.putParcelable(
-                                "media",
-                                Media(
+                            val bundle = bundleOf(
+                                "media" to Media(
                                     type = MessageType.VIDEO,
-                                    name = "VID_${chatId}_$name$extension",
+                                    name = "VID_$name$extension",
                                     uri = recordEvent.outputResults.outputUri.toString()
-                                )
+                                ),
+                                "receiverId" to receiverId,
+                                "chatId" to chatId
                             )
+
                             findNavController().navigate(
                                 R.id.action_navigation_capture_media_to_navigation_send_media,
                                 bundle
@@ -340,7 +345,7 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
                         Quality.HIGHEST,
                         FallbackStrategy.higherQualityOrLowerThan(Quality.SD)
                     )
-                )
+                ).setTargetVideoEncodingBitRate(690000)
                 .build()
             videoCapture = VideoCapture.Builder(recorder)
                 .setMirrorMode(MIRROR_MODE_ON_FRONT_ONLY)
@@ -408,7 +413,7 @@ class CaptureMediaFragment : BindingFragment<FragmentCaptureMediaBinding>() {
 
     companion object {
         private const val TAG = "CameraXApp"
-        private const val FILENAME_FORMAT = "yyyyMMddHHmmss"
+        const val FILENAME_FORMAT = "yyyyMMddHHmmss"
         private val REQUIRED_PERMISSIONS =
             mutableListOf(
                 android.Manifest.permission.CAMERA,
