@@ -10,6 +10,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.net.toUri
 import androidx.core.view.isVisible
@@ -20,7 +21,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.navigation.fragment.findNavController
 import androidx.viewbinding.ViewBinding
 import com.bumptech.glide.Glide
-import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.utils.BindingFragment
 import com.example.mvpchatapplication.MainActivity
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Profile
@@ -43,8 +44,8 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
         get() = FragmentProfileBinding::inflate
     private val navController by lazy { findNavController() }
 
-    var passwordEditDialog: PasswordEditDialog? = null
-    var emailEditDialog: EmailEditDialog? = null
+    private var passwordEditDialog: PasswordEditDialog? = null
+    private var emailEditDialog: EmailEditDialog? = null
 
     private var isUpdated = false
     private val openGallery =
@@ -102,7 +103,7 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
                             if (isUpdated) {
                                 Toast.makeText(
                                     requireContext(),
-                                    "Profile Updated Successfully!",
+                                    getString(R.string.msg_profile_update_success),
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 if (navController.previousBackStackEntry == null) {
@@ -113,7 +114,7 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
                         }
 
                         it.error?.let {
-                            Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), getString(it), Toast.LENGTH_SHORT).show()
                             viewModel.profileUpdateErrorShown()
                         }
                     }
@@ -127,7 +128,7 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
                             binding.uploadProgress.isVisible = false
                             Toast.makeText(
                                 requireContext(),
-                                "Profile image updated successfully!",
+                                getString(R.string.msg_profile_image_update_success),
                                 Toast.LENGTH_SHORT
                             ).show()
                             viewModel.resetUploadState()
@@ -151,7 +152,7 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
                                 binding.editTextEmail.setText(it.email)
                                 Toast.makeText(
                                     requireContext(),
-                                    "Email updated successfully!",
+                                    getString(R.string.msg_email_update_success),
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 emailEditDialog?.dismiss()
@@ -167,7 +168,7 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
                                 binding.editTextPassword.setText(it.password)
                                 Toast.makeText(
                                     requireContext(),
-                                    "Password updated successfully!",
+                                    getString(R.string.msg_password_update_success),
                                     Toast.LENGTH_SHORT
                                 ).show()
                                 passwordEditDialog?.dismiss()
@@ -188,12 +189,12 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
             val birthday = binding.editTextBirthday.text.trim().toString()
 
             if (name.isEmpty()) {
-                binding.editTextName.error = "Name is required"
+                binding.editTextName.error = getString(R.string.error_name_require)
                 return@setOnClickListener
             }
 
             if (birthday.isNotEmpty() && !birthday.isDateValid()) {
-                binding.editTextBirthday.error = "Invalid date format. Use DD/MM/YYYY!"
+                binding.editTextBirthday.error = getString(R.string.error_date_format)
                 return@setOnClickListener
             }
 
@@ -214,17 +215,17 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
         }
 
         binding.editPhoto.setOnClickListener {
-            requestPhotoPermission()
+            checkPhotoPermission()
         }
 
         binding.logout.setOnClickListener {
             viewModel.logOut()
-            (requireContext() as MainActivity).leaveMessageChannel()
-            (requireContext() as MainActivity).leaveChatChannel()
+            (requireActivity() as MainActivity).leaveMessageChannel()
+            (requireActivity() as MainActivity).leaveChatChannel()
         }
     }
 
-    private fun requestPhotoPermission() {
+    private fun checkPhotoPermission() {
         when {
             ContextCompat.checkSelfPermission(
                 requireContext(),
@@ -241,6 +242,8 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
                 Manifest.permission.READ_EXTERNAL_STORAGE
             )
             -> {
+
+                showPermissionExplanationDialog()
                 // In an educational UI, explain to the user why your app requires this
                 // permission for a specific feature to behave as expected, and what
                 // features are disabled if it's declined. In this UI, include a
@@ -251,18 +254,38 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
             else -> {
                 // You can directly ask for the permission.
                 // The registered ActivityResultCallback gets the result of this request.
-                val permissions = mutableListOf<String>()
-                permissions += if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    Manifest.permission.READ_MEDIA_IMAGES
-                } else {
-                    Manifest.permission.READ_EXTERNAL_STORAGE
-                }
-                if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
-                    permissions += Manifest.permission.WRITE_EXTERNAL_STORAGE
-                }
-                photoPermissionResult.launch(permissions.toTypedArray())
+                requestPhotoPermission()
             }
         }
+    }
+
+    private fun requestPhotoPermission() {
+        val permissions = mutableListOf<String>()
+        permissions += if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_IMAGES
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+            permissions += Manifest.permission.WRITE_EXTERNAL_STORAGE
+        }
+        photoPermissionResult.launch(permissions.toTypedArray())
+    }
+
+    private fun showPermissionExplanationDialog() {
+        val explanation = getString(R.string.need_photo_permission_explanation)
+        val builder = AlertDialog.Builder(requireContext())
+        builder.setTitle(getString(R.string.permission_request))
+        builder.setMessage(explanation)
+        builder.setPositiveButton(getString(R.string.grant_permission)) { _, _ ->
+            // Request the permission
+            requestPhotoPermission()
+        }
+        builder.setNegativeButton("No Thanks") { _, _ ->
+            // Handle the user's decision to not grant permission
+            // You can add custom logic here, such as displaying a message or disabling certain features
+        }
+        builder.show()
     }
 
     private fun showPasswordEditDialog() {
@@ -276,6 +299,7 @@ class ProfileFragment : BindingFragment<FragmentProfileBinding>(), DialogListene
         emailEditDialog = EmailEditDialog(this, email)
         emailEditDialog?.show(childFragmentManager, "EmailEditDialog")
     }
+
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)

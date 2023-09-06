@@ -1,15 +1,10 @@
 package com.example.mvpchatapplication.ui.message
 
 import android.util.Log
-import androidx.paging.Pager
-import androidx.paging.PagingConfig
-import androidx.paging.PagingData
 import com.example.mvpchatapplication.data.Response
 import com.example.mvpchatapplication.data.models.Chat
 import com.example.mvpchatapplication.data.models.Message
-import com.example.mvpchatapplication.data.sources.MessagesPagingSource
 import com.example.mvpchatapplication.di.MessageChannel
-import com.example.mvpchatapplication.utils.MessageViewType
 import com.example.mvpchatapplication.utils.handleApiResponse
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.query.Columns
@@ -31,35 +26,12 @@ class MessageRepository @Inject constructor(
     private val messageChannel: RealtimeChannel,
 ) {
 
-    private lateinit var pagingSource: MessagesPagingSource
-
-    fun getAllChats(chatId: Int): Flow<PagingData<MessageViewType>> {
-        return Pager(
-            config = PagingConfig(
-                pageSize = PAGE_SIZE,
-                enablePlaceholders = false,
-                prefetchDistance = 5,
-                initialLoadSize = 30
-            ),
-            pagingSourceFactory = {
-                pagingSource = MessagesPagingSource(postgrest, chatId)
-                pagingSource
-            }
-        ).flow
-    }
-
-    fun invalidate() {
-        kotlin.runCatching {
-            pagingSource.invalidate()
-        }
-    }
-
     suspend fun getAllMessages(
         chatId: Int,
         lastMessageId: Int = 0
     ): Response<List<Message>> {
         return handleApiResponse {
-            postgrest["decrypted_messages"]
+            postgrest["messages"]
                 .select(
                     Columns.raw("""*, profiles (id, profile_image)"""),
                     filter = {
@@ -77,7 +49,7 @@ class MessageRepository @Inject constructor(
     fun connectRealtime(): Flow<PostgresAction.Insert> {
         Log.d("TAG", "connectRealtime: message ")
         val flow = messageChannel.postgresChangeFlow<PostgresAction.Insert>("public") {
-            table = "decrypted_messages"
+            table = "messages"
         }.flowOn(Dispatchers.IO)
         return flow
     }
@@ -135,7 +107,7 @@ class MessageRepository @Inject constructor(
 
     suspend fun getMessageById(messageId: Int): Response<Message> {
         return handleApiResponse {
-            postgrest["decrypted_messages"]
+            postgrest["messages"]
                 .select(
                     Columns.raw("""*, profiles (id, profile_image)"""),
                     filter = {

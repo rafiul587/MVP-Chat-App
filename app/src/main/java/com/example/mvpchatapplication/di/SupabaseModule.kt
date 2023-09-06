@@ -1,12 +1,10 @@
 package com.example.mvpchatapplication.di
 
-import android.content.Context
-import android.content.SharedPreferences
 import com.example.mvpchatapplication.BuildConfig
+import com.example.mvpchatapplication.utils.SupabaseLifecycleObserver
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
-import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
@@ -25,7 +23,7 @@ import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
-object AppModule {
+object SupabaseModule {
 
     @Singleton
     @Provides
@@ -36,6 +34,8 @@ object AppModule {
                 scheme = "com.example.mvpchatapplication"
                 host = "login-callback"
                 alwaysAutoRefresh = true
+                autoLoadFromStorage = true
+                autoSaveToStorage = true
             }
             install(Postgrest)
             install(Realtime)
@@ -79,6 +79,12 @@ object AppModule {
     @Singleton
     fun provideSupabaseStorage(client: SupabaseClient): Storage {
         return client.storage
+    }
+
+    @Provides
+    @Singleton
+    fun provideSupabaseLifecycleObserver(client: SupabaseClient): SupabaseLifecycleObserver {
+        return SupabaseLifecycleObserver(client)
     }
 
 }

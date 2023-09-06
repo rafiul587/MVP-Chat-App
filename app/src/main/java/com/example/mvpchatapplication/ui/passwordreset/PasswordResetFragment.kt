@@ -9,14 +9,13 @@ import androidx.core.view.isVisible
 import androidx.fragment.app.viewModels
 import androidx.navigation.fragment.findNavController
 import androidx.viewbinding.ViewBinding
-import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.utils.BindingFragment
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.databinding.FragmentPasswordResetBinding
 import com.example.mvpchatapplication.utils.isValidEmail
 import com.example.mvpchatapplication.utils.launchAndCollectLatest
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.jan.supabase.gotrue.GoTrue
-import kotlinx.coroutines.flow.collectLatest
 import javax.inject.Inject
 
 @AndroidEntryPoint

@@ -29,13 +29,13 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.RecyclerView.OnScrollListener
 import androidx.viewbinding.ViewBinding
 import com.bumptech.glide.Glide
-import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.utils.BindingFragment
 import com.example.mvpchatapplication.BuildConfig
 import com.example.mvpchatapplication.MainActivity
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Message
-import com.example.mvpchatapplication.data.models.Profile
-import com.example.mvpchatapplication.databinding.FragmentMessageTestBinding
+import com.example.mvpchatapplication.databinding.FragmentMessageBinding
+import com.example.mvpchatapplication.di.MessageChannel
 import com.example.mvpchatapplication.utils.AdapterNotifyType
 import com.example.mvpchatapplication.utils.MessageContent
 import com.example.mvpchatapplication.utils.MessageDate
@@ -43,29 +43,29 @@ import com.example.mvpchatapplication.utils.MessageType
 import com.example.mvpchatapplication.utils.loadProfileImage
 import com.google.android.material.progressindicator.CircularProgressIndicator
 import dagger.hilt.android.AndroidEntryPoint
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.realtime.RealtimeChannel
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 
 @AndroidEntryPoint
-class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
+class MessageFragment : BindingFragment<FragmentMessageBinding>(),
     MessageAdapter.MessageClickListener {
 
     val viewModel by navGraphViewModels<MessageViewModel>(R.id.navigation_message_graph){defaultViewModelProviderFactory }
     private val navController by lazy { findNavController() }
     private lateinit var messageAdapter: MessageAdapter
 
-    private var receiverProfile: Profile? = null
-    private var chatId: Int? = null
+    @Inject lateinit var client: SupabaseClient
 
+    @MessageChannel
+    @Inject
+    lateinit var channel: RealtimeChannel
     override val bindingInflater: (LayoutInflater) -> ViewBinding
-        get() = FragmentMessageTestBinding::inflate
+        get() = FragmentMessageBinding::inflate
     private val toolBarBinding get() = binding.toolBar
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        arguments?.initializeBundles()
-    }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
@@ -80,7 +80,7 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
         binding.sendMediaFile.setOnClickListener {
             navController.navigate(
                 R.id.action_navigation_chat_to_navigation_capture_media,
-                bundleOf("chatId" to chatId, "receiverId" to receiverProfile!!.id)
+                bundleOf("chatId" to viewModel.chatId, "receiverId" to viewModel.receiverProfile!!.id)
             )
         }
     }
@@ -91,36 +91,17 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
             return
         }
 
-        val seen = viewModel.connectedUsers.contains(PresenceState(receiverProfile!!.id))
+        val seen = viewModel.connectedUsers.contains(PresenceState(viewModel.receiverProfile!!.id))
 
-        viewModel.insertData(
+        viewModel.checkAndInsert(
             message = Message(
-                chatId = chatId!!,
+                chatId = viewModel.chatId ?: -1,
                 content = message,
                 type = MessageType.TEXT,
                 seen = seen
             )
         )
     }
-
-    private fun Bundle.initializeBundles() {
-        chatId = getInt("chatId", -1)
-        receiverProfile =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                getParcelable("profile", Profile::class.java)
-            } else {
-                this.getParcelable("profile")
-            }
-        receiverProfile?.let {
-            if (chatId == -1) {
-                viewModel.getChat(it.id)
-            } else {
-                viewModel.getAllMessages(chatId!!, it.id)
-                viewModel.setChatId(chatId!!)
-            }
-        }
-    }
-
 
     private fun setUpStateListeners() {
 
@@ -142,16 +123,22 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
                         }
 
                         it.error?.let {
-                            Toast.makeText(requireContext(), it, Toast.LENGTH_SHORT).show()
+                            Toast.makeText(requireContext(), getString(it), Toast.LENGTH_SHORT).show()
                             viewModel.messageUiErrorShown()
                         }
                     }
                 }
 
                 launch {
+                    viewModel.realtimeConnecting.collectLatest {
+                        binding.realtimeConnecting.isVisible = it
+                    }
+                }
+
+                launch {
                     viewModel.insertState.collectLatest {
+                        Log.d("TAG connectRealtime", "setUpStateListeners: $it")
                         binding.sendBtn.isEnabled = it !is InsertState.Loading
-                        binding.messageSendingBar.isVisible = it is InsertState.Loading
                         when (it) {
                             is InsertState.Error -> {
                                 Toast.makeText(
@@ -173,7 +160,11 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
                                 viewModel.insertionDone()
                             }
 
-                            else -> {}
+                            null -> {
+                                binding.messageSendingBar.isVisible = false
+                            }
+
+                            InsertState.Loading ->  binding.messageSendingBar.isVisible = true
                         }
                     }
                 }
@@ -194,7 +185,7 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
             inflateMenu(R.menu.message_menu);
             setOnMenuItemClickListener {
                 if (it.itemId == R.id.deleteChat) {
-                    chatId?.let { viewModel.deleteChat() }
+                    viewModel.chatId?.let { viewModel.deleteChat() }
                     return@setOnMenuItemClickListener true;
                 }
                 return@setOnMenuItemClickListener false;
@@ -203,8 +194,8 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
                 navController.navigateUp()
             }
         }
-        toolBarBinding.otherUserName.text = receiverProfile!!.name
-        toolBarBinding.profileImage.loadProfileImage(receiverProfile?.profileImageUrl)
+        toolBarBinding.otherUserName.text = viewModel.receiverProfile!!.name
+        toolBarBinding.profileImage.loadProfileImage(viewModel.receiverProfile?.profileImageUrl)
     }
 
     private fun initRecyclerView() {
@@ -233,7 +224,7 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
                                 "onScrolled: ${lastMessage.message.createdAt!!}, ${lastMessage.message.id}"
                             )
                             viewModel.nextPage(
-                                chatId!!,
+                                viewModel.chatId ?: -1,
                                 lastMessage.message.id
                             )
                         }
@@ -264,7 +255,7 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
         val cross = view.findViewById<ImageView>(R.id.cross)!!
         dialog.setContentView(view, binding.root.layoutParams)
         Glide.with(requireContext())
-            .load("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/images/${message.decryptedContent}")
+            .load("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/images/${message.content}")
             .into(image)
         cross.setOnClickListener { dialog.dismiss() }
         dialog.show()
@@ -286,7 +277,7 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
         val mediaController = MediaController(requireContext());
         videoView.setMediaController(mediaController)
         mediaController.setAnchorView(view)
-        videoView.setVideoURI(Uri.parse("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/videos/${message.decryptedContent}"))
+        videoView.setVideoURI(Uri.parse("${BuildConfig.SUPABASE_URL}/storage/v1/object/public/videos/${message.content}"))
         videoView.start()
 
         videoView.setOnPreparedListener { mp ->
@@ -322,9 +313,9 @@ class MessageFragment : BindingFragment<FragmentMessageTestBinding>(),
         }
     }
 
-
     override fun onDestroy() {
         super.onDestroy()
         (requireActivity() as MainActivity).leaveMessageChannel()
     }
+
 }

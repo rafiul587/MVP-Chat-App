@@ -5,7 +5,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.Response
-import com.example.mvpchatapplication.ui.signup.SignUpRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.jan.supabase.exceptions.HttpRequestException
 import io.github.jan.supabase.gotrue.user.UserInfo
@@ -35,22 +34,15 @@ class SignInViewModel @Inject constructor(
             is Response.Error -> {
                 if (response.error is HttpRequestException) {
                     _uiState.update { it.copy(isLoading = false, error = R.string.network_error) }
-                } else {
-                    _uiState.update { it.copy(isLoading = false, error = R.string.other_errors) }
-                }
+                } else if (response.error.message?.contains("invalid_grant") == true) {
+                    _uiState.update { it.copy(isLoading = false, error = R.string.credential_error) }
+                } else  _uiState.update { it.copy(isLoading = false, error = R.string.other_errors) }
             }
         }
     }
 
     fun errorMessageShown() {
         _uiState.update { it.copy(error = null) }
-    }
-
-    fun isLoggedIn() = viewModelScope.launch {
-        when(val response = repository.isLoggedIn()){
-            is Response.Error -> _uiState.update { it.copy(isLoading = false, error = R.string.other_errors) }
-            is Response.Success -> _uiState.update { it.copy(isLoading = false, userInfo = response.data) }
-        }
     }
 }
 

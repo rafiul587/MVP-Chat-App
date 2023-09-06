@@ -15,7 +15,8 @@ import androidx.navigation.fragment.findNavController
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewbinding.ViewBinding
-import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.utils.BindingFragment
+import com.example.mvpchatapplication.MainActivity
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Profile
 import com.example.mvpchatapplication.databinding.FragmentChatsBinding
@@ -70,16 +71,33 @@ class ChatsFragment : BindingFragment<FragmentChatsBinding>(), ChatsAdapter.OnCh
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
                     viewModel.chatsUiState.collectLatest {
+
                         binding.progressBar.isVisible = it.isLoading
+
                         it.error?.let {
-                            Toast.makeText(requireContext(),  it, Toast.LENGTH_SHORT).show()
+                            if (it == R.string.network_error) {
+                                binding.errorLayout.isVisible = true
+                                binding.emptyLayout.isVisible = false
+                                binding.chatsRecyclerView.isVisible = false
+                                binding.refresh.setOnClickListener {
+                                    viewModel.getAllChats()
+                                }
+                                viewModel.chatErrorMessageShown()
+                                return@collectLatest
+                            }
+
+                            Toast.makeText(requireContext(), getString(it), Toast.LENGTH_SHORT)
+                                .show()
                             viewModel.chatErrorMessageShown()
                         }
+
                         it.chats?.let {
-                            if(viewModel.chatList.isEmpty()){
+                            binding.errorLayout.isVisible = false
+                            binding.chatsRecyclerView.isVisible = true
+                            if (viewModel.chatList.isEmpty()) {
                                 binding.emptyLayout.isVisible = true
                                 binding.chatsRecyclerView.isVisible = false
-                            }else {
+                            } else {
                                 binding.emptyLayout.isVisible = false
                                 binding.chatsRecyclerView.isVisible = true
                             }
@@ -102,6 +120,16 @@ class ChatsFragment : BindingFragment<FragmentChatsBinding>(), ChatsAdapter.OnCh
                                     chatsAdapter.notifyDataSetChanged()
                                     viewModel.resetChatAction()
                                 }
+                            }
+                            binding.errorLayout.isVisible = false
+                            binding.chatsRecyclerView.isVisible = true
+
+                            if (viewModel.chatList.isEmpty()) {
+                                binding.emptyLayout.isVisible = true
+                                binding.chatsRecyclerView.isVisible = false
+                            } else {
+                                binding.emptyLayout.isVisible = false
+                                binding.chatsRecyclerView.isVisible = true
                             }
                         }
                     }
@@ -200,5 +228,10 @@ class ChatsFragment : BindingFragment<FragmentChatsBinding>(), ChatsAdapter.OnCh
             R.id.action_navigation_chats_to_navigation_message_graph,
             bundleOf("chatId" to chat.id, "profile" to profile)
         )
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        (requireActivity() as MainActivity).leaveChatChannel()
     }
 }

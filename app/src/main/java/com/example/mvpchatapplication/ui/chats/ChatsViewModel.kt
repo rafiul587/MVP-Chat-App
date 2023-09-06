@@ -4,18 +4,25 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.Response
 import com.example.mvpchatapplication.data.models.Chat
 import com.example.mvpchatapplication.data.models.Profile
+import com.example.mvpchatapplication.di.ChatChannel
+import com.example.mvpchatapplication.utils.isJoinedOrJoining
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.exceptions.HttpRequestException
+import io.github.jan.supabase.gotrue.SessionStatus
 import io.github.jan.supabase.gotrue.gotrue
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.RealtimeChannel
 import io.github.jan.supabase.realtime.decodeOldRecord
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.realtime
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
@@ -30,6 +37,8 @@ class ChatListViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val repository: ChatsRepository,
     private val client: SupabaseClient,
+    @ChatChannel
+    private val channel: RealtimeChannel
 ) : ViewModel() {
 
     private var _chatsUiState = MutableStateFlow(ChatsUIState())
@@ -38,29 +47,35 @@ class ChatListViewModel @Inject constructor(
     private val _searchState = MutableStateFlow(SearchState())
     val searchState = _searchState.asStateFlow()
 
-    var lastLoadedItemId = 0
+    private var lastLoadedItemId =  0
     var isLastPage = false
 
     val chatList = mutableListOf<Chat>()
 
+    private var chatActionJob: Job? = null
+
     private fun connectRealtime() = viewModelScope.launch(Dispatchers.IO) {
         kotlin.runCatching {
             Log.d("TAG", "connectRealtime chat: ")
-            repository.connectRealtime().catch {
+            chatActionJob?.cancel()
+            chatActionJob = repository.connectRealtime().catch {
                 _chatsUiState.update { it.copy(isLoading = false, error = it.error) }
             }.onEach {
                 when (it) {
                     is PostgresAction.Delete -> {
                         Log.d("TAG", "connectRealtime hjgjghg: ${it.decodeOldRecord<Chat>()}")
-                        val index = chatList.indexOfFirst { chat -> it.decodeOldRecord<Chat>().id == chat.id }
+                        val index =
+                            chatList.indexOfFirst { chat -> it.decodeOldRecord<Chat>().id == chat.id }
                         if (index != -1) {
                             chatList.removeAt(index)
-                            _chatsUiState.value = ChatsUIState(chatAction = ChatAction.Delete(index))
+                            _chatsUiState.value =
+                                ChatsUIState(chatAction = ChatAction.Delete(index))
                         }
                     }
 
                     is PostgresAction.Insert -> {
                         val chat = it.decodeRecord<Chat>()
+                        Log.d("TAG", "connectRealtime inserted: $chat")
                         getProfileInfo(chat)
                     }
 
@@ -71,7 +86,7 @@ class ChatListViewModel @Inject constructor(
                     is PostgresAction.Update -> {
                         val chat = it.decodeRecord<Chat>()
                         getMessageForChat(chat)
-                        Log.d("TAG", "connectRealtime: $chat")
+                        Log.d("TAG", "connectRealtime updated: $chat")
 
                     }
                 }
@@ -82,18 +97,28 @@ class ChatListViewModel @Inject constructor(
         }
     }
 
-    private fun getAllChatRooms() = viewModelScope.launch {
+    fun getAllChats() = viewModelScope.launch {
+
         _chatsUiState.update { it.copy(isLoading = true) }
         when (val response = repository.getAllChats(lastChatId = lastLoadedItemId)) {
             is Response.Error -> {
-                _chatsUiState.update {
+                if (response.error is HttpRequestException) {
+                    _chatsUiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = R.string.network_error
+                        )
+                    }
+                } else _chatsUiState.update {
                     it.copy(
-                        isLoading = false, error = response.error.message ?: "Something went wrong!"
+                        isLoading = false,
+                        error = R.string.other_errors
                     )
                 }
             }
 
             is Response.Success -> {
+                Log.d("TAG", "getAllChatRooms: ${response.data}")
                 chatList.clear()
                 chatList.addAll(response.data)
                 isLastPage =
@@ -125,9 +150,17 @@ class ChatListViewModel @Inject constructor(
 
                 is Response.Error -> {
                     Log.d("TAG", "nextPage: ${response.error.message}")
-                    _chatsUiState.update {
+                    if (response.error is HttpRequestException) {
+                        _chatsUiState.update {
+                            it.copy(
+                                isLoading = false,
+                                error = R.string.network_error
+                            )
+                        }
+                    } else _chatsUiState.update {
                         it.copy(
-                            isLoading = false, error = "Something went wrong!"
+                            isLoading = false,
+                            error = R.string.other_errors
                         )
                     }
 
@@ -153,7 +186,8 @@ class ChatListViewModel @Inject constructor(
                 chatList.addAll(newList.map {
                     if (it.id == message.chatId) {
                         it.copy(
-                            lastMessage = message.decryptedContent,
+                            lastMessageId = message.id,
+                            lastMessage = message.content,
                             lastMessageType = message.type,
                             lastMessageAuthorId = message.authorId,
                             lastMessageSeen = message.seen,
@@ -218,17 +252,30 @@ class ChatListViewModel @Inject constructor(
         _searchState.value = SearchState()
     }
 
-    fun getMyUid() = client.gotrue.currentUserOrNull()?.id ?: ""
+    fun getMyUid() = savedStateHandle.get<String>("uid") ?: run {
+        val uid = client.gotrue.currentUserOrNull()?.id ?: ""
+        savedStateHandle["uid"] = uid
+        uid
+    }
 
     fun setMessageSeenTrue(messageId: Int) = viewModelScope.launch {
         repository.setMessageSeenTrue(messageId)
     }
 
     init {
-        getAllChatRooms()
         client.realtime.status.onEach {
-            if (it == Realtime.Status.CONNECTED) {
+            Log.d("Statuspp", "Realtime Message: $it")
+            if (it == Realtime.Status.CONNECTED && !channel.isJoinedOrJoining()) {
                 connectRealtime()
+            }
+        }.launchIn(viewModelScope)
+
+        client.gotrue.sessionStatus.onEach {
+            Log.d("Statuspp", "Auth Chat: $it")
+            if (it is SessionStatus.Authenticated) {
+                if(chatList.isEmpty()) {
+                    getAllChats()
+                }
             }
         }.launchIn(viewModelScope)
     }
@@ -238,12 +285,12 @@ data class ChatsUIState(
     val isLoading: Boolean = false,
     val chats: List<Chat>? = null,
     val chatAction: ChatAction? = null,
-    val error: String? = null,
+    val error: Int? = null,
 )
 
 sealed class ChatAction {
-    object Insert : ChatAction()
-    object Update : ChatAction()
+    data object Update : ChatAction()
+    data object Insert : ChatAction()
     data class Delete(val index: Int) : ChatAction()
 }
 

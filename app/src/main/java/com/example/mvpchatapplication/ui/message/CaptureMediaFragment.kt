@@ -33,7 +33,7 @@ import androidx.core.view.GestureDetectorCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.navigation.fragment.findNavController
 import androidx.viewbinding.ViewBinding
-import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.utils.BindingFragment
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Media
 import com.example.mvpchatapplication.databinding.FragmentCaptureMediaBinding

@@ -9,7 +9,7 @@ import androidx.fragment.app.viewModels
 import androidx.navigation.NavController
 import androidx.navigation.fragment.findNavController
 import androidx.viewbinding.ViewBinding
-import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.utils.BindingFragment
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.databinding.FragmentSignUpBinding
 import com.example.mvpchatapplication.utils.isValidEmail

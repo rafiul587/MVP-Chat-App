@@ -12,8 +12,6 @@ data class Message(
     @SerialName("chat_id")
     val chatId: Int,
     val content: String? = null,
-    @SerialName("decrypted_content")
-    val decryptedContent: String? = null,
     val type: MessageType,
     @SerialName("created_at")
     val createdAt: String? = null,

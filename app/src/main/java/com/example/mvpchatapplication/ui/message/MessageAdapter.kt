@@ -100,15 +100,15 @@ class MessageAdapter(
             binding.playIcon.isVisible = message.type == MessageType.VIDEO
             when (message.type) {
                 MessageType.IMAGE -> {
-                    binding.imageMessage.loadMedia(message.decryptedContent!!, MessageType.IMAGE)
+                    binding.imageMessage.loadMedia(message.content!!, MessageType.IMAGE)
                 }
 
                 MessageType.VIDEO -> {
-                    binding.imageMessage.loadMedia(message.decryptedContent!!, MessageType.VIDEO)
+                    binding.imageMessage.loadMedia(message.content!!, MessageType.VIDEO)
                 }
 
                 else -> {
-                    binding.message.text = message.decryptedContent
+                    binding.message.text = message.content
                 }
             }
 
@@ -133,15 +133,15 @@ class MessageAdapter(
             Log.d("TAG", "bind: $message")
             when (message.type) {
                 MessageType.IMAGE -> {
-                    binding.imageMessage.loadMedia(message.decryptedContent!!, MessageType.IMAGE)
+                    binding.imageMessage.loadMedia(message.content!!, MessageType.IMAGE)
                 }
 
                 MessageType.VIDEO -> {
-                    binding.imageMessage.loadMedia(message.decryptedContent!!, MessageType.VIDEO)
+                    binding.imageMessage.loadMedia(message.content!!, MessageType.VIDEO)
                 }
 
                 else -> {
-                    binding.message.text = message.decryptedContent
+                    binding.message.text = message.content
                 }
             }
 

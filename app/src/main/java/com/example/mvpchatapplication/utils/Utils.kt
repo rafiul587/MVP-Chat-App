@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Parcelable
 import android.provider.MediaStore
 import android.text.format.DateUtils
 import android.util.Log
@@ -19,12 +20,14 @@ import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.Response
 import com.example.mvpchatapplication.data.models.Message
 import com.example.mvpchatapplication.ui.message.CaptureMediaFragment
+import io.github.jan.supabase.realtime.RealtimeChannel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.parcelize.Parcelize
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import java.io.ByteArrayOutputStream
@@ -91,16 +94,6 @@ enum class MessageType {
     VIDEO
 }
 
-object DateParser {
-    private val dateFormat1: DateFormat = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX")
-    fun convertDateToString(date: String?): String {
-        if (date == null) return ""
-        var strDate = ""
-        strDate = dateFormat1.format(date)
-        return strDate
-    }
-}
-
 fun String.isDateValid(): Boolean {
     val dateFormat = SimpleDateFormat("dd/MM/yyyy", Locale.getDefault())
     dateFormat.isLenient = false
@@ -128,10 +121,12 @@ enum class AdapterNotifyType {
     MessageOfExistingDate
 }
 
-sealed class MessageLoadStatus {
+@Parcelize
+sealed class MessageLoadStatus : Parcelable {
     data class Success(val chatId: Int): MessageLoadStatus()
     data class Failed(val receiverId: String): MessageLoadStatus()
     data class NotFound(val receiverId: String): MessageLoadStatus()
+    data class ChatFound(val chatId: Int): MessageLoadStatus()
 }
 
 data class MessageContent(val message: Message) : MessageViewType() {
@@ -325,3 +320,6 @@ interface DialogListener {
     fun onEmailChanged(email: String)
     fun onPasswordChanged(password: String)
 }
+
+fun RealtimeChannel.isJoinedOrJoining() =
+    status.value == RealtimeChannel.Status.JOINED || status.value == RealtimeChannel.Status.JOINING

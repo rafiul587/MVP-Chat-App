@@ -1,4 +1,4 @@
-package com.example.mvpchatapplication
+package com.example.mvpchatapplication.utils
 
 import android.os.Bundle
 import android.view.LayoutInflater

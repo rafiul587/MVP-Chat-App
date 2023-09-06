@@ -3,7 +3,6 @@ package com.example.mvpchatapplication.ui.message
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.MediaController
@@ -12,7 +11,7 @@ import androidx.core.view.isVisible
 import androidx.navigation.fragment.findNavController
 import androidx.navigation.navGraphViewModels
 import androidx.viewbinding.ViewBinding
-import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.utils.BindingFragment
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.models.Media
 import com.example.mvpchatapplication.data.models.Message
@@ -42,8 +41,6 @@ class SendMediaFragment : BindingFragment<FragmentSendMediaBinding>() {
 
             receiverId = it.getString("receiverId", "")
             chatId = it.getInt("chatId", 0)
-
-            Log.d("TAG", "onCreate: $media")
 
         }
     }
@@ -118,12 +115,12 @@ class SendMediaFragment : BindingFragment<FragmentSendMediaBinding>() {
 
                     val message = Message(
                         authorId = viewModel.getMyUid(),
-                        decryptedContent = media!!.name,
+                        content = media!!.name,
                         type = media!!.type,
-                        chatId = chatId!!,
+                        chatId = viewModel.chatId ?: -1,
                         seen = seen
                     )
-                    viewModel.insertData(message)
+                    viewModel.checkAndInsert(message)
                     viewModel.uploadDone()
                 }
 

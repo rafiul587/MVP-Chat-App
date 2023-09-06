@@ -5,17 +5,15 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.widget.Toast
-import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
 import androidx.fragment.app.viewModels
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.navigation.NavController
 import androidx.navigation.NavOptions
 import androidx.navigation.fragment.findNavController
 import androidx.viewbinding.ViewBinding
-import com.example.mvpchatapplication.BindingFragment
+import com.example.mvpchatapplication.utils.BindingFragment
 import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.databinding.FragmentSignInBinding
 import com.example.mvpchatapplication.utils.isValidEmail
@@ -23,9 +21,7 @@ import com.example.mvpchatapplication.utils.launchAndCollectLatest
 import dagger.hilt.android.AndroidEntryPoint
 import io.github.jan.supabase.gotrue.GoTrue
 import io.github.jan.supabase.gotrue.SessionStatus
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -64,12 +60,13 @@ class SignInFragment : BindingFragment<FragmentSignInBinding>() {
 
                         SessionStatus.NetworkError -> {
                             binding.progressBar.isVisible = false
+                            binding.signInScreenGroup.isVisible = false
                             Log.d("TAG", "onViewCreated: $it")
                         }
 
                         SessionStatus.NotAuthenticated -> {
                             binding.progressBar.isVisible = false
-                            binding.root.isVisible = true
+                            binding.signInScreenGroup.isVisible = true
                             binding.signUp.setOnClickListener { navigateToSignUp() }
                             binding.signIn.setOnClickListener { singIn() }
                             binding.forgotPassword.setOnClickListener {

@@ -6,6 +6,7 @@ import androidx.core.net.toFile
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.Response
 import com.example.mvpchatapplication.data.models.Media
 import com.example.mvpchatapplication.data.models.Message
@@ -16,32 +17,42 @@ import com.example.mvpchatapplication.utils.MessageContent
 import com.example.mvpchatapplication.utils.MessageDate
 import com.example.mvpchatapplication.utils.MessageLoadStatus
 import com.example.mvpchatapplication.utils.MessageViewType
+import com.example.mvpchatapplication.utils.isJoinedOrJoining
 import com.example.mvpchatapplication.utils.saveFileBitmapToFile
 import com.example.mvpchatapplication.utils.toDayOrDateString
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.annotations.SupabaseExperimental
+import io.github.jan.supabase.exceptions.HttpRequestException
+import io.github.jan.supabase.gotrue.SessionStatus
 import io.github.jan.supabase.gotrue.gotrue
 import io.github.jan.supabase.realtime.PostgresAction
+import io.github.jan.supabase.realtime.Realtime
 import io.github.jan.supabase.realtime.RealtimeChannel
 import io.github.jan.supabase.realtime.decodeJoinsAs
 import io.github.jan.supabase.realtime.decodeLeavesAs
 import io.github.jan.supabase.realtime.decodeRecord
 import io.github.jan.supabase.realtime.postgresChangeFlow
 import io.github.jan.supabase.realtime.presenceChangeFlow
+import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.realtime.track
 import io.github.jan.supabase.storage.UploadStatus
 import io.github.jan.supabase.storage.storage
 import io.github.jan.supabase.storage.uploadAsFlow
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import java.lang.Exception
 import javax.inject.Inject
 
 
@@ -50,11 +61,10 @@ class MessageViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val repository: MessageRepository,
     private val client: SupabaseClient,
-    @MessageChannel
-    private val channel: RealtimeChannel
+    @MessageChannel private val channel: RealtimeChannel
 ) : ViewModel() {
 
-    private var _messageUiState = MutableStateFlow(ChatUIState())
+    private var _messageUiState = MutableStateFlow(MessageUIState())
     val messageUiState = _messageUiState.asStateFlow()
 
     private var _insertState: MutableStateFlow<InsertState<Message>?> = MutableStateFlow(null)
@@ -63,68 +73,75 @@ class MessageViewModel @Inject constructor(
     private var _uploadState = MutableStateFlow<UploadState?>(null)
     val uploadState = _uploadState.asStateFlow()
 
-    private var messageLoadStatus: MessageLoadStatus? = null
+    private var _realtimeConnecting = MutableStateFlow<Boolean>(false)
+    val realtimeConnecting = _realtimeConnecting.asStateFlow()
+
+    val chatId = savedStateHandle.get<Int>("chatId")
+    val receiverProfile = savedStateHandle.get<Profile>("profile")
+
+    private var messageLoadStatus: MessageLoadStatus? = savedStateHandle["messageLoadStatus"]
+        set(value) {
+            field = value
+            savedStateHandle["messageLoadStatus"] = messageLoadStatus
+        }
 
     val messageList = mutableListOf<MessageViewType>()
     val separators = mutableListOf<String>()
     val connectedUsers = mutableSetOf<PresenceState>()
 
     var lastLoadedItemId = 0
+
     var isLastPage = false
-    private var chatId: Int = -1
+    var insertJob: Job? = null
 
     private fun connectRealtime() = viewModelScope.launch(Dispatchers.IO) {
-        kotlin.runCatching {
+        try {
+            if (!channel.isJoinedOrJoining()) {
 
-            val changeFlow = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
-                table = "messages"
+                channel.join(true)
+                channel.track(PresenceState(uid = getMyUid()))
+            } else {
+                insertionDone()
             }
-            val presenceChangeFlow = channel.presenceChangeFlow()
 
-            presenceChangeFlow.onEach {
-                connectedUsers += it.decodeJoinsAs()
-                connectedUsers -= it.decodeLeavesAs()
-                Log.d("TAG", "connectRealtime: $connectedUsers")
-            }.launchIn(viewModelScope)
-            //in a new coroutine (or use Flow.onEach().launchIn(scope)):
-            changeFlow.onEach { data ->
-                val message = data.decodeRecord<Message>()
-                Log.d("TAG", "connectRealtime: $message")
-                if (message.authorId != getMyUid()) {
-                    setMessageSeenTrue(message.id)
-                }
-                getMessageById(message.id)
-            }.launchIn(viewModelScope)
-            channel.join()
-            channel.track(PresenceState(uid = getMyUid()))
-
-        }.onFailure {
-            Log.d("TAG", "connectRealtime failed: ${it.message}")
+        } catch (e: Exception) {
+            insertionDone()
+            Log.d("TAG", "connectRealtime failed: ${e.message}")
         }
     }
 
-    fun getAllMessages(chatId: Int, receiverId: String) = viewModelScope.launch {
+    private fun getAllMessages(chatId: Int) = viewModelScope.launch {
         _messageUiState.update { it.copy(isLoading = true) }
         when (val response = repository.getAllMessages(chatId)) {
 
             is Response.Error -> {
-                _messageUiState.update {
+                if (response.error is HttpRequestException) {
+                    _messageUiState.update {
+                        it.copy(
+                            isLoading = false, error = R.string.network_error
+                        )
+                    }
+                } else _messageUiState.update {
                     it.copy(
-                        isLoading = false,
-                        error = "Something went wrong!"
+                        isLoading = false, error = R.string.other_errors
                     )
                 }
-                messageLoadStatus = MessageLoadStatus.Failed(receiverId)
+                messageLoadStatus = MessageLoadStatus.ChatFound(chatId)
             }
 
             is Response.Success -> {
                 processList(response.data)
                 messageLoadStatus = MessageLoadStatus.Success(chatId)
-                _messageUiState.update { it.copy(isLoading = false, messages = response.data) }
+                _messageUiState.update {
+                    it.copy(
+                        isLoading = false, messages = response.data
+                    )
+                }
             }
         }
     }
 
+    /** This method is called when paginate messages. We save the last loaded message and request chats less that the last loaded id everytime */
     fun nextPage(chatId: Int, lastMessageId: Int) {
         Log.d("TAG", "nextPage: $lastMessageId")
 
@@ -137,7 +154,9 @@ class MessageViewModel @Inject constructor(
                 is Response.Success -> {
                     processList(response.data)
                     _messageUiState.update {
-                        it.copy(isLoading = false, messages = response.data)
+                        it.copy(
+                            isLoading = false, messages = response.data
+                        )
                     }
                 }
 
@@ -145,8 +164,7 @@ class MessageViewModel @Inject constructor(
                     Log.d("TAG", "nextPage: ${response.error.message}")
                     _messageUiState.update {
                         it.copy(
-                            isLoading = false,
-                            error = "Something went wrong!"
+                            isLoading = false, error = R.string.other_errors
                         )
                     }
 
@@ -166,14 +184,12 @@ class MessageViewModel @Inject constructor(
             val formattedTime = event.createdAt!!.toDayOrDateString()
             Log.d("TAG", "processList: $formattedTime")
             if (formattedTime != date) {
-                date = formattedTime
-                //when next page's data loaded checking if the data is from the last dates of the previous page
-                //Suppose last data was from today and next pages first data is also from today so I removed the first today
+                date = formattedTime/*when next page's data loaded checking if the data is from the last dates of the previous page
+                Suppose last data was from today and next pages first data is also from today so I removed the first today */
                 if (separators.contains(date)) {
                     messageList.remove(MessageDate(date))
-                } else {
-                    //This check is basically to skip the first date so that I can add it after all the message of that date is loaded
-                    //This is required because I want to make {Hi, Hello, Today, Nice, Yesterday} instead of {Today, Hi, Hello, Yesterday, Nice} because this list will be reversed in recyclerView
+                } else {/*This check is basically to skip the first date so that I can add it after all the message of that date is loaded
+                    This is required because I want to make {Hi, Hello, Today, Nice, Yesterday} instead of {Today, Hi, Hello, Yesterday, Nice} because this list will be reversed in recyclerView */
                     if (index != 0) {
                         items.add(MessageDate(separators.last()))
                     }
@@ -191,6 +207,10 @@ class MessageViewModel @Inject constructor(
 
     fun addMessage(message: Message): AdapterNotifyType {
         val formattedTime = message.createdAt!!.toDayOrDateString()
+        Log.d(
+            "TAG",
+            "addMessage: $message, ${separators.isNotEmpty() && separators.first() == formattedTime}"
+        )
         return if (separators.isNotEmpty() && separators.first() == formattedTime) {
             messageList.add(0, MessageContent(message))
             AdapterNotifyType.MessageOfExistingDate
@@ -202,44 +222,71 @@ class MessageViewModel @Inject constructor(
         }
     }
 
-    fun insertData(message: Message) = viewModelScope.launch {
-        _insertState.value = InsertState.Loading
-        Log.d("TAG", "insertData: $messageLoadStatus")
+
+    /**
+     *[MessageLoadStatus.NotFound] If this is a new chat first it creates a chat and the insert the message.
+     *[MessageLoadStatus.Failed] If message load failed so we don't know if it is a new chat or not so we try to [getChat] again.
+     *[MessageLoadStatus.ChatFound] If chat found but failed to load messages of that chat then request [getAllMessage] as well as insert the message
+     *[MessageLoadStatus.Success] If chat found and all the message is also loaded that means we can insert the message from the next time.
+     */
+    fun checkAndInsert(message: Message) = viewModelScope.launch {
+        Log.d("TAG", "insertData connectRealtime: $messageLoadStatus")
+        if (realtimeConnecting.value || messageUiState.value.isLoading) {
+            return@launch
+        }
         when (val status = messageLoadStatus) {
             is MessageLoadStatus.NotFound -> {
-                when (val response = repository.createChat(status.receiverId)) {
-                    is Response.Error -> {
-                        _insertState.value = InsertState.Error("Failed to create chat!")
-                    }
-
-                    is Response.Success -> {
-                        chatId = response.data.id
-                        when (repository.insert(if (message.chatId == -1) message.copy(chatId = response.data.id) else message)) {
-                            is Response.Error -> {
-                                _insertState.value = InsertState.Error("Message send failed!")
-                            }
-
-                            else -> {}
-                        }
-                    }
-                }
+                createChat(status.receiverId, message)
             }
 
             is MessageLoadStatus.Failed -> {
-                getChat(status.receiverId)
+                getChat(status.receiverId, message)
+            }
+
+            is MessageLoadStatus.ChatFound -> {
+                getAllMessages(status.chatId)
+
+                val mMessage =
+                    if (message.chatId == -1) message.copy(chatId = status.chatId) else message
+                insertMessage(mMessage)
+
             }
 
             is MessageLoadStatus.Success -> {
-                when (repository.insert(if (message.chatId == -1) message.copy(chatId = status.chatId) else message)) {
-                    is Response.Error -> {
-                        _insertState.value = InsertState.Error("Message send failed!")
-                    }
-
-                    else -> {}
-                }
+                val mMessage =
+                    if (message.chatId == -1) message.copy(chatId = status.chatId) else message
+                insertMessage(mMessage)
             }
 
             else -> {}
+        }
+    }
+
+    private suspend fun createChat(receiverId: String, message: Message) {
+        when (val response = repository.createChat(receiverId)) {
+            is Response.Error -> {
+                _insertState.value = InsertState.Error("Failed to create chat!")
+            }
+
+            is Response.Success -> {
+                messageLoadStatus = MessageLoadStatus.Success(response.data.id)
+                val mMessage =
+                    if (message.chatId == -1) message.copy(chatId = response.data.id) else message
+                insertMessage(mMessage)
+            }
+        }
+    }
+
+    private suspend fun insertMessage(message: Message) {
+        _insertState.value = InsertState.Loading
+        when (repository.insert(message = message)) {
+            is Response.Error -> {
+                _insertState.value = InsertState.Error("Message send failed!")
+            }
+
+            else -> {
+
+            }
         }
     }
 
@@ -253,22 +300,24 @@ class MessageViewModel @Inject constructor(
     }
 
     fun deleteChat() = viewModelScope.launch {
-        Log.d("TAG", "deleteChat: $chatId")
-        if(chatId != -1) {
-            _messageUiState.update { it.copy(isLoading = true) }
-            when (repository.deleteChat(if (chatId == -1) this@MessageViewModel.chatId else chatId)) {
-                is Response.Error -> {
-                    _messageUiState.update {
-                        it.copy(
-                            isLoading = false,
-                            error = "Deletion Failed!"
-                        )
-                    }
-                }
+        if (messageLoadStatus !is MessageLoadStatus.Success && messageLoadStatus !is MessageLoadStatus.ChatFound) return@launch
+        val chatId =
+            if (messageLoadStatus is MessageLoadStatus.Success) (messageLoadStatus as MessageLoadStatus.Success).chatId
+            else (messageLoadStatus as MessageLoadStatus.ChatFound).chatId
 
-                is Response.Success -> {
-                    _messageUiState.update { it.copy(isLoading = false, deleted = true) }
+        _messageUiState.update { it.copy(isLoading = true) }
+
+        when (repository.deleteChat(chatId)) {
+            is Response.Error -> {
+                _messageUiState.update {
+                    it.copy(
+                        isLoading = false, error = R.string.deletion_failed
+                    )
                 }
+            }
+
+            is Response.Success -> {
+                _messageUiState.update { it.copy(isLoading = false, deleted = true) }
             }
         }
     }
@@ -291,11 +340,13 @@ class MessageViewModel @Inject constructor(
      * If there is no chat with the user then it will save the receiverId so that in first message it can create a chat with the id.
      * And if there is already a chat with the user then it will save the [chatId], will get all messages of the chat and connect realtime as well.
      */
-    fun getChat(receiverId: String) = viewModelScope.launch {
+    private suspend fun getChat(receiverId: String, message: Message? = null) {
         when (val response = repository.getChat(receiverId)) {
+
             is Response.Success -> {
-                getAllMessages(response.data.id, receiverId)
-                chatId = response.data.id
+                Log.d("TAG", "getChat: ${response.data.id}")
+                getAllMessages(response.data.id)
+                messageLoadStatus = MessageLoadStatus.ChatFound(response.data.id)
             }
 
             is Response.Error -> {
@@ -304,17 +355,24 @@ class MessageViewModel @Inject constructor(
                 } else {
                     _messageUiState.update {
                         it.copy(
-                            isLoading = false,
-                            error = "Message Load Failed!"
+                            isLoading = false, error = R.string.message_load_failed
                         )
                     }
                     MessageLoadStatus.Failed(receiverId)
                 }
             }
         }
+
+        message?.let {
+            checkAndInsert(message)
+        }
     }
 
-    fun getMyUid() = client.gotrue.currentUserOrNull()?.id ?: ""
+    fun getMyUid() = savedStateHandle.get<String>("uid") ?: run {
+        val uid = client.gotrue.currentUserOrNull()?.id ?: ""
+        savedStateHandle["uid"] = uid
+        uid
+    }
 
     private fun setMessageSeenTrue(chatId: Int) = viewModelScope.launch {
         repository.setMessageSeenTrue(chatId)
@@ -325,8 +383,9 @@ class MessageViewModel @Inject constructor(
         saveFileBitmapToFile(Uri.parse(media.uri).toFile())?.let {
             val bucket = client.storage["images"]
             bucket.uploadAsFlow(media.name, it)
-                .catch { UploadState.Error("Upload Failed!") }
+                .catch { _uploadState.value = UploadState.Error("Upload Failed!") }
                 .collect { status ->
+                    Log.d("TAG", "uploadImage: $status")
                     when (status) {
                         is UploadStatus.Progress -> {
                             _uploadState.value =
@@ -345,8 +404,7 @@ class MessageViewModel @Inject constructor(
     fun uploadVideo(media: Media) = viewModelScope.launch {
         val bucket = client.storage["videos"]
         bucket.uploadAsFlow(media.name, Uri.parse(media.uri).toFile())
-            .catch { UploadState.Error("Upload Failed!") }
-            .collect { status ->
+            .catch { _uploadState.value = UploadState.Error("Upload Failed!") }.collect { status ->
                 when (status) {
                     is UploadStatus.Progress -> {
                         _uploadState.value =
@@ -360,37 +418,114 @@ class MessageViewModel @Inject constructor(
             }
     }
 
+    /** Reset upload state after upload is done */
     fun uploadDone() {
         _uploadState.value = null
     }
 
-    fun setChatId(id: Int){
-        chatId = id
+
+    /** Track whether user is on the chat or not */
+    private fun addUserPresenceTracker() {
+        kotlin.runCatching {
+            if (channel.isJoinedOrJoining()) return
+            channel.presenceChangeFlow().distinctUntilChanged().onEach {
+                    connectedUsers += it.decodeJoinsAs()
+                    connectedUsers -= it.decodeLeavesAs()
+                }.catch {
+                    insertionDone()
+                }.launchIn(viewModelScope)
+        }
     }
+
+    /** Listen realtime message when new message insert */
+    private fun realtimeMessageUpdate() {
+        kotlin.runCatching {
+            if (channel.isJoinedOrJoining()) return
+            insertJob?.cancel()
+            insertJob = channel.postgresChangeFlow<PostgresAction.Insert>(schema = "public") {
+                    table = "messages"
+                }.distinctUntilChanged().onEach { data ->
+                    val message = data.decodeRecord<Message>()
+                    if (message.authorId != getMyUid()) {
+                        setMessageSeenTrue(message.id)
+                    }
+                    getMessageById(message.id)
+                }.catch {
+                    insertionDone()
+                }.launchIn(viewModelScope)
+        }
+    }
+
+    private fun loadChat() {
+        client.gotrue.sessionStatus.onEach {
+            Log.d("Statuspp", "Auth Message: $it")
+            if (it is SessionStatus.Authenticated) {
+
+                if (messageList.isEmpty()) {
+                    receiverProfile?.let {
+                        if (chatId == null) {
+                            getChat(it.id)
+                        } else {
+                            getAllMessages(chatId)
+                        }
+                    }
+                }
+            }
+        }.launchIn(viewModelScope)
+    }
+
+    private fun checkRealtimeConnection() {
+        combine(
+            client.realtime.status,
+            channel.status,
+        ) { realtimeStatus, channelStatus ->
+            Pair(realtimeStatus, channelStatus)
+        }.onEach { (realtimeStatus, channelStatus) ->
+            // Update the visibility of the progress bar based on the combined values
+            _realtimeConnecting.value =
+                !(realtimeStatus == Realtime.Status.CONNECTED && channelStatus == RealtimeChannel.Status.JOINED)
+        }.catch {
+            _messageUiState.update {
+                it.copy(
+                    isLoading = false, error = R.string.other_errors
+                )
+            }
+        }.launchIn(viewModelScope)
+    }
+
     init {
-        connectRealtime()
+        addUserPresenceTracker()
+        realtimeMessageUpdate()
+        checkRealtimeConnection()
+        loadChat()
+
+        client.realtime.status.onEach {
+            if (it == Realtime.Status.CONNECTED) {
+                connectRealtime()
+            }
+        }.launchIn(viewModelScope)
+
     }
 }
 
-data class ChatUIState(
+data class MessageUIState(
     val isLoading: Boolean = false,
     val messages: List<Message>? = null,
-    val error: String? = null,
+    val error: Int? = null,
     val deleted: Boolean = false
 )
 
 sealed class InsertState<out R> {
-    object Loading : InsertState<Nothing>()
+    data object Loading : InsertState<Nothing>()
     data class Success<out T>(val data: T) : InsertState<T>()
     class Error(val error: String) : InsertState<Nothing>()
 }
 
 sealed class UploadState {
-    object Success : UploadState()
+    data object Success : UploadState()
     class Uploading(val progress: Float = 0f) : UploadState()
     class Error(val error: String) : UploadState()
 }
-
 
 @Serializable
 data class PresenceState(val uid: String)

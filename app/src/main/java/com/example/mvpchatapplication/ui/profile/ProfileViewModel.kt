@@ -5,9 +5,11 @@ import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.mvpchatapplication.R
 import com.example.mvpchatapplication.data.Response
 import com.example.mvpchatapplication.data.models.Profile
 import dagger.hilt.android.lifecycle.HiltViewModel
+import io.github.jan.supabase.exceptions.HttpRequestException
 import io.github.jan.supabase.storage.UploadStatus
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,18 +40,15 @@ class ProfileViewModel @Inject constructor(
 
 
     private fun getUserProfile() = viewModelScope.launch {
-        when (val result = repository.getUserProfile()) {
+        when (val response = repository.getUserProfile()) {
             is Response.Success -> {
-                _profileUiState.update { it.copy(isLoading = false, profile = result.data) }
+                _profileUiState.update { it.copy(isLoading = false, profile = response.data) }
             }
 
             is Response.Error -> {
-                _profileUiState.update {
-                    it.copy(
-                        isLoading = false,
-                        error = result.error.message ?: "Something went wrong!"
-                    )
-                }
+                if (response.error is HttpRequestException) {
+                    _profileUiState.update { it.copy(isLoading = false, error = R.string.network_error) }
+                } else  _profileUiState.update { it.copy(isLoading = false, error = R.string.other_errors) }
             }
         }
     }
@@ -98,7 +97,7 @@ class ProfileViewModel @Inject constructor(
     fun logOut() = viewModelScope.launch {
         _profileUiState.update { it.copy(isLoading = true) }
         when (repository.logOut()) {
-            is Response.Error -> _profileUiState.update { it.copy(error = "Logout Failed!") }
+            is Response.Error -> _profileUiState.update { it.copy(error = R.string.logout_failed) }
             is Response.Success -> _profileUiState.update { it.copy(isLoggedOut = true) }
         }
     }
@@ -156,7 +155,7 @@ data class ProfileUiState(
     val isLoading: Boolean = false,
     val profile: Profile? = null,
     val isLoggedOut: Boolean = false,
-    val error: String? = null
+    val error: Int? = null
 )
 
 sealed class UserModifyState {
